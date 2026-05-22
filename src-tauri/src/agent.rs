@@ -13,7 +13,7 @@
 //! provider's state directory changes. The callback is debounced to
 //! ~300ms so bursty writes coalesce into a single refresh.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -190,6 +190,7 @@ pub fn default_providers() -> Vec<Box<dyn AgentProvider>> {
 
 const MAX_SESSIONS: usize = 12;
 const MAX_TOOLS: usize = 10;
+const MAX_TOOLS_PER_CATEGORY: usize = 5;
 /// Recent global event feed cap (after merging across providers). Bumped
 /// from 18 → 80 so chatty bursts between scans don't drop events that
 /// the renderer's workMixHistory needs to accumulate per category.
@@ -262,8 +263,50 @@ fn merge_scans(scans: Vec<ProviderScan>) -> AgentActivity {
         })
         .collect();
     tools.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
-    tools.truncate(MAX_TOOLS);
-    activity.tools = tools;
+
+    // Two-pass truncation:
+    //   1. Global cap (MAX_TOOLS) keeps the renderer's overall payload
+    //      small.
+    //   2. Per-category cap (MAX_TOOLS_PER_CATEGORY) guarantees each
+    //      district inspector gets at least its top-N tools — without
+    //      this, chatty categories (bash, view) crowd out the long-tail
+    //      categories (MCP, web, agents) entirely so their inspector
+    //      panel shows "no tools" even when calls were observed.
+    let mut per_category: HashMap<String, usize> = HashMap::new();
+    let mut survivors: Vec<AgentToolMetric> = Vec::with_capacity(tools.len());
+    for tool in tools.iter() {
+        let bucket = per_category.entry(tool.category.clone()).or_insert(0);
+        if *bucket >= MAX_TOOLS_PER_CATEGORY {
+            continue;
+        }
+        *bucket += 1;
+        survivors.push(tool.clone());
+    }
+    // Top up to MAX_TOOLS with any leftovers (already sorted by count
+    // desc) so the global cap is filled when we have slack.
+    if survivors.len() < MAX_TOOLS {
+        let kept: std::collections::HashSet<(String, String)> = survivors
+            .iter()
+            .map(|t| (t.name.clone(), t.category.clone()))
+            .collect();
+        for tool in tools.iter() {
+            if survivors.len() >= MAX_TOOLS {
+                break;
+            }
+            if kept.contains(&(tool.name.clone(), tool.category.clone())) {
+                continue;
+            }
+            survivors.push(tool.clone());
+        }
+    }
+    // Enforce the global cap but never shrink below the per-category
+    // guarantees. Derived from the number of distinct categories seen
+    // in this scan so adding a new district later doesn't silently
+    // truncate its top-N entries. Worst case: every category has
+    // MAX_TOOLS_PER_CATEGORY entries → ceiling = categories * 5.
+    let category_floor = per_category.len() * MAX_TOOLS_PER_CATEGORY;
+    survivors.truncate(MAX_TOOLS.max(category_floor));
+    activity.tools = survivors;
 
     all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
     all_events.truncate(MAX_RECENT_EVENTS);

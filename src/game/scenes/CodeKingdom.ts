@@ -226,6 +226,48 @@ const DISTRICT_TEXTURES: Record<string, string> = {
   mcp: 'ts-house-blue',
 };
 
+/// Single source of truth for district hues. Both `buildDistricts` and
+/// `categoryColor` read from this map — previously they each had their
+/// own hex literals which silently drifted apart whenever one was
+/// tweaked. The 'alert' entry is shared with the attention/error pulse
+/// path and is intentionally not a district.
+const DISTRICT_COLORS: Record<KingdomCategory, number> = {
+  forge: 0xff8a3d,
+  library: 0x61d6ff,
+  terminal: 0xa5ff6b,
+  signal: 0xb88cff,
+  delegates: 0xff6bd6,
+  skills: 0xc56bff,
+  court: 0xffd54a,
+  mcp: 0x4ad6a8,
+  alert: 0xff5252,
+  // The remaining KingdomCategory members are event-kind tags, not
+  // visual districts, so they fall back to the muted default in
+  // `categoryColor`. Listing them keeps the Record exhaustive.
+  workshop: 0x9aa6c8,
+  complete: 0x9aa6c8,
+  thinking: 0x9aa6c8,
+  waiting: 0x9aa6c8,
+  prompt: 0x9aa6c8,
+  arrival: 0x9aa6c8,
+  activity: 0x9aa6c8,
+};
+
+/// Vertical offset (px at 1× scale) applied to the four diagonal
+/// districts so they don't visually crowd the side cardinals (Commands,
+/// Intent). Scaled down with the layout in `buildDistricts`.
+const DIAGONAL_DISTRICT_SHIFT_PX = 22;
+
+/// Hit radius (px) used by `updateHoveredDistrict` to detect the cursor
+/// over a district sprite. Slightly larger than the rendered icon so the
+/// inspector tracks pointer intent rather than pixel-perfect targeting.
+const DISTRICT_HOVER_RADIUS_PX = 62;
+
+/// Stagger between sequential event pulses fired by `ingestActivityEvents`.
+/// Keeps a burst of N events from looking like a single blob — each one
+/// gets `i * PULSE_STAGGER_MS` delay so the eye can track the train.
+const PULSE_STAGGER_MS = 120;
+
 export class CodeKingdomScene extends Phaser.Scene {
   /// Full-window dark fill that sits behind the kingdom map. Drawn
   /// once in `create()` and resized inline if the user grows the
@@ -244,10 +286,22 @@ export class CodeKingdomScene extends Phaser.Scene {
   private textObjects: any[] = [];
   private selectedDistrict = 0;
   private hoveredDistrictIndex = -1;
-  private pinnedDistrictKey: string | null = null;
+  // Sticky last-hover: persists when the pointer leaves the ring so the
+  // district inspector keeps showing the last thing the user pointed at,
+  // instead of snapping back to a previously clicked "pinned" district.
+  // Click does NOT modify this — hover is the only writer.
+  private inspectedDistrictKey: string | null = null;
   private pollEvent?: any;
   private startupRetryEvents: any[] = [];
   private loading = false;
+  /// True once the scene has finished its bootstrap ingest. The
+  /// initial snapshot of `recent_events` is HISTORICAL — those events
+  /// have already been counted by the Rust scanner and are present in
+  /// the 24h dedupe set, so animating "live" pulses for them is pure
+  /// noise (boxes flow but the badge numbers never move). After
+  /// bootstrap completes, real watcher pushes set this so subsequent
+  /// ingests animate normally.
+  private bootstrapCompleted = false;
   private lastRefresh = 0;
   private userSelectedSession = false;
   private seenEventKeys = new Set<string>();
@@ -368,7 +422,12 @@ export class CodeKingdomScene extends Phaser.Scene {
 
     // Restore last-session prefs so context survives a window restart.
     const prefs = loadKingdomPrefs();
-    if (prefs.pinnedDistrictKey) this.pinnedDistrictKey = prefs.pinnedDistrictKey;
+    // Backward compat: older builds stored the pin under `pinnedDistrictKey`.
+    // Treat that as the initial sticky-hover position so users don't lose
+    // their last view when upgrading.
+    this.inspectedDistrictKey = prefs.inspectedDistrictKey
+      ?? prefs.pinnedDistrictKey
+      ?? null;
     if (prefs.replayPaused) this.replayPaused = true;
     if (prefs.transcriptOpen) this.transcriptOpen = true;
     if (typeof prefs.lastSelectedSessionId === 'string') {
@@ -386,7 +445,14 @@ export class CodeKingdomScene extends Phaser.Scene {
       if (idx >= 0) this.selectedSessionIndex = idx;
     }
     this.renderActivity();
-    void this.refreshActivity(true);
+    // Bootstrap is done — any further ingest is a genuine push from
+    // the watcher, so animate pulses normally. The async refresh below
+    // also goes through `ingestActivityEvents` but its events are
+    // already in `seenEventKeys` from the bootstrap, so the dedupe
+    // makes it a no-op for animation.
+    void this.refreshActivity(true).finally(() => {
+      this.bootstrapCompleted = true;
+    });
     // Push: backend watcher calls this on filesystem changes. Defensive
     // check: only refresh if this scene is still the active one.
     window.__koaOnAgentActivityChanged = () => {
@@ -725,15 +791,15 @@ export class CodeKingdomScene extends Phaser.Scene {
 
     const layout = this.layout ?? this.computeLayout();
     const { centerX, centerY, radiusX, radiusY, topLift, s } = layout;
-    const specs: Omit<District, 'x' | 'y' | 'count'>[] = [
-      { key: 'forge', label: 'Forge', short: 'Edits', color: 0xff8a3d },
-      { key: 'library', label: 'Library', short: 'Reads', color: 0x61d6ff },
-      { key: 'terminal', label: 'Terminal Keep', short: 'Commands', color: 0xa5ff6b },
-      { key: 'signal', label: 'Signal Tower', short: 'Web/Docs', color: 0xb88cff },
-      { key: 'delegates', label: 'Guild Hall', short: 'Agents', color: 0xff6bd6 },
-      { key: 'skills', label: 'Tome Hall', short: 'Skills', color: 0xc56bff },
-      { key: 'court', label: 'Royal Court', short: 'Intent', color: 0xffd54a },
-      { key: 'mcp', label: 'Envoy House', short: 'MCP', color: 0x4ad6a8 },
+    const specs: Omit<District, 'x' | 'y' | 'count' | 'color'>[] = [
+      { key: 'forge', label: 'Forge', short: 'Edits' },
+      { key: 'library', label: 'Library', short: 'Reads' },
+      { key: 'terminal', label: 'Terminal Keep', short: 'Commands' },
+      { key: 'signal', label: 'Signal Tower', short: 'Web/Docs' },
+      { key: 'delegates', label: 'Guild Hall', short: 'Agents' },
+      { key: 'skills', label: 'Tome Hall', short: 'Skills' },
+      { key: 'court', label: 'Royal Court', short: 'Intent' },
+      { key: 'mcp', label: 'Envoy House', short: 'MCP' },
     ];
 
     // Even 45° spacing keeps the ring a true circle around the castle
@@ -744,7 +810,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     // the side districts (Commands, Intent) at sin=0 so their labels
     // and brackets don't visually crowd each other. Cardinal positions
     // (top/bottom/sides) stay on the geometric circle.
-    const diagonalShift = Math.round(22 * Math.max(s, 0.85));
+    const diagonalShift = Math.round(DIAGONAL_DISTRICT_SHIFT_PX * Math.max(s, 0.85));
 
     return specs.map((spec, index) => {
       const angle = -Math.PI / 2 + (Math.PI * 2 * index) / specs.length;
@@ -754,6 +820,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       const diagY = isDiagonal ? Math.sign(sinA) * diagonalShift : 0;
       return {
         ...spec,
+        color: DISTRICT_COLORS[spec.key as KingdomCategory] ?? 0x9aa6c8,
         x: centerX + Math.cos(angle) * radiusX,
         y: centerY + sinA * radiusY - lift + diagY,
         count: counts.get(spec.key) ?? 0,
@@ -1356,10 +1423,6 @@ export class CodeKingdomScene extends Phaser.Scene {
     if (!district) return;
 
     const stats = this.computeDistrictStats(district.key);
-    const pinned = this.pinnedDistrictKey === district.key;
-    // Pinning is a click affordance only — no on-screen text about it.
-    // Hovering still updates the inspector unless a district is pinned.
-    void pinned;
     const title = district.short;
 
     this.drawPanel(x, y, w, h, title);
@@ -1406,17 +1469,17 @@ export class CodeKingdomScene extends Phaser.Scene {
     }
   }
 
-  /// Hover > pinned > selected. Hover always wins so users can quickly
-  /// glance at each district by mousing over — they don't have to click
-  /// each one. Click still "pins" so the panel keeps showing the
-  /// selected district when the pointer moves away to read details.
-  /// Keyboard `selectedDistrict` is the final fallback for accessibility.
+  /// Sticky last-hover model: whatever the user most recently pointed
+  /// at stays visible when the pointer moves away. Currently hovered
+  /// district always wins (immediate response), `inspectedDistrictKey`
+  /// is the persisted last-hover, and `selectedDistrict` is the
+  /// keyboard-nav fallback.
   private activeInspectedDistrict(): District | undefined {
     const hovered = this.districts[this.hoveredDistrictIndex];
     if (hovered) return hovered;
-    if (this.pinnedDistrictKey) {
-      const pinned = this.districts.find(d => d.key === this.pinnedDistrictKey);
-      if (pinned) return pinned;
+    if (this.inspectedDistrictKey) {
+      const last = this.districts.find(d => d.key === this.inspectedDistrictKey);
+      if (last) return last;
     }
     return this.districts[this.selectedDistrict];
   }
@@ -1750,13 +1813,25 @@ export class CodeKingdomScene extends Phaser.Scene {
       const district = this.districts[i];
       const dx = pointer.x - district.x;
       const dy = pointer.y - district.y;
-      if (Math.sqrt(dx * dx + dy * dy) <= 62) {
+      if (Math.sqrt(dx * dx + dy * dy) <= DISTRICT_HOVER_RADIUS_PX) {
         next = i;
         break;
       }
     }
     if (next !== this.hoveredDistrictIndex) {
       this.hoveredDistrictIndex = next;
+      // Hovering a new district promotes it to the sticky-hover key so
+      // the inspector keeps showing it after the pointer leaves the ring.
+      // We only WRITE on transition into a district (next >= 0) — when
+      // the pointer leaves the ring entirely (next === -1) the sticky
+      // key intentionally stays put so the panel doesn't blank out.
+      if (next >= 0) {
+        const d = this.districts[next];
+        if (d && this.inspectedDistrictKey !== d.key) {
+          this.inspectedDistrictKey = d.key;
+          savePref('inspectedDistrictKey', this.inspectedDistrictKey);
+        }
+      }
       this.renderActivity();
     }
   }
@@ -1803,12 +1878,16 @@ export class CodeKingdomScene extends Phaser.Scene {
       this.replayCursor = Math.max(0, this.replayCursor - trim);
     }
 
-    if (wasAtLive && !this.replayPaused) {
+    if (wasAtLive && !this.replayPaused && this.bootstrapCompleted) {
       if (this.districts.length > 0) {
         for (let i = 0; i < appended.length; i++) {
-          this.queueEventPulse(appended[i], 'live', i * 120);
+          this.queueEventPulse(appended[i], 'live', i * PULSE_STAGGER_MS);
         }
       }
+      this.replayCursor = this.eventLog.length;
+    } else if (wasAtLive && !this.replayPaused) {
+      // Bootstrap path: still advance the cursor so the user is "at
+      // live" from the start, but skip the pulse animation.
       this.replayCursor = this.eventLog.length;
     }
     this.updateReplayState();
@@ -2182,17 +2261,11 @@ export class CodeKingdomScene extends Phaser.Scene {
         return;
       }
     }
-    // District pin/unpin. Hover index is updated every frame so it's the
-    // authoritative "what is under the pointer" for the ring.
-    if (this.hoveredDistrictIndex >= 0) {
-      const d = this.districts[this.hoveredDistrictIndex];
-      if (d) {
-        this.pinnedDistrictKey = this.pinnedDistrictKey === d.key ? null : d.key;
-        savePref('pinnedDistrictKey', this.pinnedDistrictKey);
-        this.renderActivity();
-        return;
-      }
-    }
+    // Clicking a district is intentionally a no-op now: sticky last-hover
+    // already keeps the inspector showing whatever the user pointed at,
+    // so the previous "click to pin / click to unpin" model was redundant
+    // and prone to surprise jumps when the panel snapped back to a stale
+    // pinned district.
   }
 
   private openSelectedSessionInEditor() {
@@ -2601,18 +2674,7 @@ function pulsePoint(pulse: EventPulse) {
 }
 
 function categoryColor(category: string) {
-  switch (category) {
-    case 'forge': return 0xff8a3d;
-    case 'library': return 0x61d6ff;
-    case 'terminal': return 0xa5ff6b;
-    case 'signal': return 0xb88cff;
-    case 'delegates': return 0xff6bd6;
-    case 'skills': return 0xc56bff;
-    case 'court': return 0xffd54a;
-    case 'mcp': return 0x4ad6a8;
-    case 'alert': return 0xff5252;
-    default: return 0x9aa6c8;
-  }
+  return DISTRICT_COLORS[category as KingdomCategory] ?? 0x9aa6c8;
 }
 
 function colorToCss(color: number) {
@@ -2698,7 +2760,12 @@ function feedLabel(event: CopilotEventSummary) {
 const PREFS_KEY = 'koa_prefs';
 
 interface KingdomPrefs {
+  /// Backward compat — old builds stored the click-pinned district key here.
+  /// Read on load as a fallback for `inspectedDistrictKey`.
   pinnedDistrictKey?: string | null;
+  /// Sticky last-hovered district. Persists across window restarts so
+  /// the inspector resumes on whatever the user was last looking at.
+  inspectedDistrictKey?: string | null;
   replayPaused?: boolean;
   lastSelectedSessionId?: string | null;
   transcriptOpen?: boolean;
@@ -2709,7 +2776,23 @@ function loadKingdomPrefs(): KingdomPrefs {
     const raw = window.localStorage?.getItem(PREFS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed as KingdomPrefs;
+    if (parsed && typeof parsed === 'object') {
+      const prefs = parsed as KingdomPrefs;
+      // One-time migration: older builds stored the click-pinned
+      // district under `pinnedDistrictKey`. Fold it into the new
+      // `inspectedDistrictKey` (if not already set) and drop the legacy
+      // field so it doesn't linger in storage indefinitely.
+      if (prefs.pinnedDistrictKey !== undefined) {
+        if (prefs.inspectedDistrictKey === undefined || prefs.inspectedDistrictKey === null) {
+          prefs.inspectedDistrictKey = prefs.pinnedDistrictKey;
+        }
+        delete prefs.pinnedDistrictKey;
+        try {
+          window.localStorage?.setItem(PREFS_KEY, JSON.stringify(prefs));
+        } catch { /* ignore — quota/private-mode is non-fatal */ }
+      }
+      return prefs;
+    }
   } catch { /* ignore */ }
   return {};
 }
