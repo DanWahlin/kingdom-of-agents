@@ -346,7 +346,6 @@ export class CodeKingdomScene extends Phaser.Scene {
   /// fire bursts of historical events at scrub speed and would create
   /// a noisy strobe.
   private arrivalEffects: ArrivalEffect[] = [];
-  private districtActivityCounts = new Map<string, number>();
   private demoFlowTimer = 0;
   private demoFlowIndex = 0;
   private replayPaused = false;
@@ -2167,7 +2166,6 @@ export class CodeKingdomScene extends Phaser.Scene {
       trailAlphas[i - 1] = 0.32 * (1 - t);
     }
 
-    let arrived = false;
     for (const pulse of this.eventPulses) {
       pulse.delay -= delta;
       if (pulse.delay > 0) continue;
@@ -2213,7 +2211,6 @@ export class CodeKingdomScene extends Phaser.Scene {
       if (pulse.progress >= 1 && !pulse.arrived) {
         pulse.arrived = true;
         if (pulse.source === 'live') {
-          arrived = true;
           this.incrementDistrictActivity(pulse.districtKey);
           // Sigil at the building's actual center (not the pulse's
           // arrival point, which is offset above/below the building).
@@ -2255,16 +2252,18 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.eventPulses = this.eventPulses.filter(pulse => pulse.progress < 1);
     this.arrivalEffects = this.arrivalEffects.filter(eff => eff.age < eff.lifetime);
     this.activeEventPulseCount = this.eventPulses.length;
-    if (arrived) this.renderActivity();
   }
 
-  private incrementDistrictActivity(key: KingdomCategory) {
-    const next = (this.districtActivityCounts.get(key) ?? 0) + 1;
-    this.districtActivityCounts.set(key, next);
-    this.districtEventBadges = {
-      ...this.districtEventBadges,
-      [key]: next,
-    };
+  /// Reserved for future per-pulse-arrival hook. Currently a no-op:
+  /// district badge counts are sourced from `compute24hCategoryCounts`
+  /// which reads `workMixHistory` — updated in `ingestActivityEvents`
+  /// BEFORE the pulse is even queued. The previous implementation
+  /// triggered a full `renderActivity()` rebuild on every arrival just
+  /// to redraw the same number, which destroyed framerate during
+  /// bursts (8+ full scene rebuilds/second). The arrival sigil is now
+  /// the sole visual feedback for "pulse landed".
+  private incrementDistrictActivity(_key: KingdomCategory) {
+    // intentionally empty — see comment above.
   }
 
   private advanceDemoActivity(delta: number) {
