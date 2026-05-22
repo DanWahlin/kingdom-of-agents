@@ -1394,11 +1394,15 @@ export class CodeKingdomScene extends Phaser.Scene {
       this.ui.strokeRoundedRect(x + 18, rowY - 4, w - 36, 26, 8);
       this.ui.fillStyle(rowColor, session.is_active ? 1 : 0.58);
       this.ui.fillCircle(x + 34, rowY + 9, 5);
+      // Press Start 2P is monospace with advance ≈ 1em, so use the
+      // font size as the per-character width. Older 7.4/7.6 estimates
+      // were way under, letting the title overrun the chip and the
+      // chip slip past the panel's right edge.
       const idLabel = session.id.length > 8 ? session.id.slice(0, 8) : session.id;
-      const idWidth = idLabel.length * 7.4;
+      const idWidth = idLabel.length * 10;
       const titleStart = x + 48;
       const titleEnd = x + w - idWidth - 22;
-      const titleChars = Math.max(10, Math.floor((titleEnd - titleStart) / 7.6));
+      const titleChars = Math.max(10, Math.floor((titleEnd - titleStart) / 12));
       this.addText(titleStart, rowY + 9, truncate(session.title || session.id, titleChars), 12, theme.text).setOrigin(0, 0.5);
       this.addText(x + w - 18, rowY + 9, idLabel, 10, theme.muted).setOrigin(1, 0.5);
       this.sessionPickerRows.push({ id: session.id, x: x + 18, y: rowY - 4, w: w - 36, h: 26 });
@@ -1424,20 +1428,36 @@ export class CodeKingdomScene extends Phaser.Scene {
     // removing the duplicated title/repo lines.
     const detailsY = pickerBottom + 16;
     const status = statusTextColor(session.status);
+    // Press Start 2P advance ≈ 1em → at fontSize 13, ~13px per char.
+    // Compute how many characters fit in the panel's inner width
+    // (panel width minus 22px padding on each side) so we can truncate
+    // value text to keep every line inside the panel even at the
+    // narrow end of the rightW range.
+    const innerChars = Math.max(12, Math.floor((w - 44) / 13));
+    const lastLabel = eventLabel(session.last_event_kind, session.last_event_category);
     this.addText(x + 22, detailsY, `Status: ${session.status}`, 14, status).setOrigin(0, 0);
-    this.addText(x + 22, detailsY + 26, `Last: ${eventLabel(session.last_event_kind, session.last_event_category)}`, 13, theme.text).setOrigin(0, 0);
-    this.addText(x + 22, detailsY + 50, `Tool: ${truncate(session.last_tool || 'none', 28)}`, 13, theme.muted).setOrigin(0, 0);
+    this.addText(x + 22, detailsY + 26, `Last: ${truncate(lastLabel, Math.max(6, innerChars - 6))}`, 13, theme.text).setOrigin(0, 0);
+    this.addText(x + 22, detailsY + 50, `Tool: ${truncate(session.last_tool || 'none', Math.max(6, innerChars - 6))}`, 13, theme.muted).setOrigin(0, 0);
     const inTok = session.input_tokens ?? 0;
     const outTok = session.output_tokens;
     this.addText(x + 22, detailsY + 74, `Age: ${formatAge(session.stale_seconds)}`, 13, theme.muted).setOrigin(0, 0);
     // Tokens are SCOPED TO THIS SESSION ONLY (vs. the Summary
     // "Tokens · 24h" card which sums across every scanned session in
-    // the cutoff window). The "this session" qualifier makes that
-    // distinction explicit so the two figures aren't read as the same
-    // metric in different places.
-    this.addText(x + 22, detailsY + 96, `Tokens (this session): ${compactNumber(inTok)} in / ${compactNumber(outTok)} out`, 13, theme.muted).setOrigin(0, 0);
+    // the cutoff window). The panel header ("Selected Session")
+    // already scopes the label, so we use a short prefix. At very
+    // narrow widths we fall back to a stacked "in / out" form so
+    // neither figure spills past the panel edge.
+    const tokensLine = `Tokens: ${compactNumber(inTok)} in / ${compactNumber(outTok)} out`;
+    let tokensBottomY = detailsY + 96;
+    if (tokensLine.length <= innerChars) {
+      this.addText(x + 22, detailsY + 96, tokensLine, 13, theme.muted).setOrigin(0, 0);
+    } else {
+      this.addText(x + 22, detailsY + 96, `Tokens in:  ${compactNumber(inTok)}`, 13, theme.muted).setOrigin(0, 0);
+      this.addText(x + 22, detailsY + 114, `Tokens out: ${compactNumber(outTok)}`, 13, theme.muted).setOrigin(0, 0);
+      tokensBottomY = detailsY + 114;
+    }
 
-    const actionsY = detailsY + 128;
+    const actionsY = tokensBottomY + 32;
     const btnH = 28;
     let btnX = x + 22;
     if (session.git_root) {
