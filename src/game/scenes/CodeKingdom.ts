@@ -44,6 +44,7 @@ interface CopilotSessionSummary {
   last_event_category?: string;
   last_event_timestamp?: string;
   stale_seconds?: number;
+  last_model?: string;
   git_root?: string;
   recent_tool_calls?: SessionToolCall[];
 }
@@ -148,6 +149,7 @@ declare global {
     __kingdomAutoFixture?: boolean;
     __koaOnAgentActivityChanged?: () => void;
     __koaSetTheme?: (mode: 'dark' | 'light') => void;
+    __koaUpdateModel?: (model: string) => void;
   }
 }
 
@@ -586,6 +588,9 @@ export class CodeKingdomScene extends Phaser.Scene {
     if (window.__koaSetTheme) {
       window.__koaSetTheme = undefined;
     }
+    // Blank the navbar model chip so a stale model id doesn't linger
+    // when the scene tears down (game switch, hot reload, etc.).
+    try { window.__koaUpdateModel?.(''); } catch { /* no-op */ }
     this.clearDynamicObjects();
     this.flow?.clear();
     this.moat?.clear();
@@ -683,6 +688,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     } catch { /* DOM not ready yet — next render will catch up */ }
     this.selectedSession = this.pickSelectedSession();
     this.insightCards = this.buildInsightCards();
+    this.pushSelectedModelToNavbar();
 
     this.drawBackground();
     this.drawDistricts();
@@ -899,7 +905,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       { label: 'Active', value: String(this.activity.active_sessions), sub: `${this.activity.scanned_sessions} scanned`, color: this.activity.active_sessions > 0 ? greenAccent : theme.muted },
       { label: 'Tools/min', value: callsPerMin > 0 ? callsPerMin.toFixed(callsPerMin < 10 ? 1 : 0) : '0', sub: `${this.activity.total_tool_calls} total`, color: callsPerMin > 0 ? cyanAccent : theme.muted },
       { label: 'Turns', value: compactNumber(turns), sub: turnsSub, color: turns > 0 ? purpleAccent : theme.muted },
-      { label: 'Tokens (in/out)', value: compactNumber(inputTokens + outputTokens), sub: `${compactNumber(inputTokens)} / ${compactNumber(outputTokens)}`, color: goldAccent },
+      { label: 'Tokens · 24h', value: compactNumber(inputTokens + outputTokens), sub: `${compactNumber(inputTokens)} in / ${compactNumber(outputTokens)} out`, color: goldAccent },
     ];
   }
 
@@ -1383,9 +1389,15 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.addText(x + 22, detailsY + 50, `Tool: ${truncate(session.last_tool || 'none', 28)}`, 13, theme.muted).setOrigin(0, 0);
     const inTok = session.input_tokens ?? 0;
     const outTok = session.output_tokens;
-    this.addText(x + 22, detailsY + 74, `Age: ${formatAge(session.stale_seconds)}  in ${compactNumber(inTok)} / out ${compactNumber(outTok)}`, 13, theme.muted).setOrigin(0, 0);
+    this.addText(x + 22, detailsY + 74, `Age: ${formatAge(session.stale_seconds)}`, 13, theme.muted).setOrigin(0, 0);
+    // Tokens are SCOPED TO THIS SESSION ONLY (vs. the Summary
+    // "Tokens · 24h" card which sums across every scanned session in
+    // the cutoff window). The "this session" qualifier makes that
+    // distinction explicit so the two figures aren't read as the same
+    // metric in different places.
+    this.addText(x + 22, detailsY + 96, `Tokens (this session): ${compactNumber(inTok)} in / ${compactNumber(outTok)} out`, 13, theme.muted).setOrigin(0, 0);
 
-    const actionsY = detailsY + 108;
+    const actionsY = detailsY + 128;
     const btnH = 28;
     let btnX = x + 22;
     if (session.git_root) {
@@ -2202,6 +2214,22 @@ export class CodeKingdomScene extends Phaser.Scene {
       }
     }
     return sessions[safeIndex] ?? sessions.find(session => session.is_active) ?? sessions[0];
+  }
+
+  /// Push the currently-selected session's model id to the navbar
+  /// chip via the global `__koaUpdateModel` hook. Fires on every
+  /// `renderActivity()` call so it covers (1) initial bootstrap,
+  /// (2) the user clicking a different session, and (3) a mid-session
+  /// model switch where the same session's `last_model` changes
+  /// between scans. The hud.js helper short-circuits if the value
+  /// hasn't actually changed, so calling it on every render is cheap.
+  private pushSelectedModelToNavbar() {
+    try {
+      const model = this.selectedSession?.last_model ?? '';
+      window.__koaUpdateModel?.(model);
+    } catch {
+      /* DOM not ready yet — next render will catch up */
+    }
   }
 
   private getSessionPickerOptions() {

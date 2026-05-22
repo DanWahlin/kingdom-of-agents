@@ -123,7 +123,7 @@ test.describe('Kingdom of Agents — Startup', () => {
     expect(state!.sessionCount).toBe(3);
     expect(state!.districtCount).toBe(8);
     expect(state!.scannedSessions).toBe(3);
-    expect(state!.insightLabels).toContain('Tokens (in/out)');
+    expect(state!.insightLabels).toContain('Tokens · 24h');
     expect(state!.opsAttention).toBe('review');
     expect(state!.opsRecommendation).toMatch(/failed.*in /);
     expect(state!.selectedSessionId).toBe('beta4567');
@@ -247,6 +247,42 @@ test.describe('Kingdom of Agents — Dashboard', () => {
 
     const after = await getKingdomState(page);
     expect(after!.selectedSessionId).toBe('alpha123');
+  });
+
+  test('navbar model chip mirrors the selected session and updates on session switch', async ({ page }) => {
+    // Inject a fixture where each session reports a different model
+    // so we can verify the chip swaps when the selection changes.
+    const fixture = JSON.parse(JSON.stringify(KINGDOM_FIXTURE));
+    fixture.sessions[0].last_model = 'gpt-5.5';   // alpha123
+    fixture.sessions[1].last_model = 'claude-sonnet-4.6'; // beta4567 (default-selected: review)
+    fixture.sessions[2].last_model = 'gpt-4.1';   // gamma890
+
+    await page.addInitScript((f) => { (window as any).__kingdomFixture = f; }, fixture);
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    // beta4567 is the default-selected session (review attention) →
+    // chip should show its model and not be hidden.
+    await expect(page.locator('#model-chip')).toHaveText('claude-sonnet-4.6');
+    await expect(page.locator('#model-chip')).not.toHaveClass(/empty/);
+
+    // Click into alpha123 → chip should switch to its model.
+    const before = await getKingdomState(page);
+    const alphaRow = before!.sessionPickerRows.find((row: any) => row.id === 'alpha123');
+    expect(alphaRow).toBeTruthy();
+    const off = await canvasOffset(page);
+    await page.mouse.click(off.x + alphaRow.x + alphaRow.w / 2, off.y + alphaRow.y + alphaRow.h / 2);
+    await page.waitForTimeout(150);
+
+    await expect(page.locator('#model-chip')).toHaveText('gpt-5.5');
+  });
+
+  test('navbar model chip stays hidden when no session reports a model', async ({ page }) => {
+    // Default fixture has no `last_model` on any session. The chip
+    // should render with the `empty` class (display: none) so we
+    // never flash a blank pill.
+    await expect(page.locator('#model-chip')).toHaveClass(/empty/);
+    await expect(page.locator('#model-chip')).toHaveText('');
   });
 
   test('hovering a district makes it the sticky-inspected district and persists across reload', async ({ page }) => {

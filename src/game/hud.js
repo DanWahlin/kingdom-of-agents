@@ -123,4 +123,31 @@
     setRecommendation(rec, isPlaceholder);
     setAlerts(alerts || []);
   };
+
+  // -------------------------------------------------------------------
+  // Active model chip in the topbar. The scene calls this whenever the
+  // selected session changes OR when its `last_model` value changes
+  // between scans (so mid-session model switches surface immediately).
+  // Pass an empty string to hide the chip — used on scene shutdown and
+  // when no session has emitted a model-bearing event yet.
+  // -------------------------------------------------------------------
+
+  var modelEl = $('model-chip');
+  var lastModel = '';
+
+  window.__koaUpdateModel = function (model) {
+    if (!modelEl) return;
+    var next = (model == null ? '' : String(model)).trim();
+    if (next === lastModel) return;
+    lastModel = next;
+    if (next === '') {
+      modelEl.classList.add('empty');
+      modelEl.textContent = '';
+      modelEl.title = 'Active model for the selected session';
+    } else {
+      modelEl.classList.remove('empty');
+      modelEl.textContent = next;
+      modelEl.title = 'Active model: ' + next;
+    }
+  };
 })();

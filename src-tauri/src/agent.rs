@@ -13,7 +13,7 @@
 //! provider's state directory changes. The callback is debounced to
 //! ~300ms so bursty writes coalesce into a single refresh.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -84,6 +84,13 @@ pub struct AgentSessionSummary {
     pub last_event_category: String,
     pub last_event_timestamp: String,
     pub stale_seconds: u64,
+    /// Most recent model id observed on this session's
+    /// `assistant.message` or `tool.execution_complete` events (e.g.
+    /// `"gpt-5.5"`). Empty when the session log has no model-bearing
+    /// events yet. Lets the renderer display the active model in the
+    /// navbar and update it when the user switches models mid-session.
+    #[serde(default)]
+    pub last_model: String,
     /// Absolute path to the session's git root. Exposed so the
     /// renderer can offer "open in editor" deep links. Empty when the
     /// workspace.yaml didn't record one.
@@ -417,6 +424,9 @@ fn scan_copilot() -> ProviderScan {
     session_dirs.truncate(MAX_SESSIONS);
     scan.scanned_sessions = session_dirs.len();
 
+    // Load once per scan; reused for every tool execution event below.
+    let mcp_allowlist = load_mcp_tool_allowlist();
+
     let now = SystemTime::now();
 
     for (session_path, modified) in session_dirs {
@@ -462,6 +472,7 @@ fn scan_copilot() -> ProviderScan {
             &mut summary,
             &mut scan.tool_counts,
             &mut scan.recent_events,
+            &mcp_allowlist,
         );
 
         // Active sessions report "working" or "thinking" by activity
@@ -669,6 +680,7 @@ fn summarize_events(
     summary: &mut AgentSessionSummary,
     tool_counts: &mut BTreeMap<(String, String), usize>,
     recent_events: &mut Vec<AgentEventSummary>,
+    mcp_allowlist: &HashSet<String>,
 ) {
     let Ok(mut file) = fs::File::open(path) else {
         return;
@@ -709,6 +721,21 @@ fn summarize_events(
         let event_category = categorize_event(event_type).to_string();
         record_last_event(summary, &timestamp, event_type, &event_category);
 
+        // Many event types carry `data.model` (assistant.message,
+        // tool.execution_start/complete, assistant.streaming_delta,
+        // etc.). The JSONL is appended chronologically so the last
+        // write wins → newer events overwrite the captured value,
+        // letting the renderer surface mid-session model switches.
+        if let Some(model) = value
+            .get("data")
+            .and_then(|data| data.get("model"))
+            .and_then(|v| v.as_str())
+        {
+            if !model.is_empty() {
+                summary.last_model = model.to_string();
+            }
+        }
+
         if event_type == "tool.execution_start" {
             let raw_tool_name = value
                 .get("data")
@@ -719,7 +746,7 @@ fn summarize_events(
             let args = value
                 .get("data")
                 .and_then(|data| data.get("arguments"));
-            let (tool_name, category) = classify_tool(&raw_tool_name, args);
+            let (tool_name, category) = classify_tool(&raw_tool_name, args, mcp_allowlist);
             record_last_event(summary, &timestamp, event_type, &category);
 
             summary.tool_count += 1;
@@ -953,7 +980,11 @@ fn record_last_event(
     }
 }
 
-fn classify_tool(raw_name: &str, args: Option<&serde_json::Value>) -> (String, String) {
+fn classify_tool(
+    raw_name: &str,
+    args: Option<&serde_json::Value>,
+    mcp_allowlist: &HashSet<String>,
+) -> (String, String) {
     // Meta-tools like `skill` and `task` carry their real identity in
     // their arguments (skill name, sub-agent type). Surfacing those
     // identifiers makes the activity feed and tool ranking actually
@@ -976,23 +1007,67 @@ fn classify_tool(raw_name: &str, args: Option<&serde_json::Value>) -> (String, S
             .to_string();
         return (subagent, "delegates".to_string());
     }
-    let category = categorize_tool(raw_name).to_string();
+    let category = categorize_tool(raw_name, mcp_allowlist).to_string();
     (raw_name.to_string(), category)
 }
 
-fn categorize_tool(tool_name: &str) -> &'static str {
+/// Load all MCP-registered tool names from `~/.copilot/m-mcp-servers.json`
+/// so `categorize_tool` can route them to the MCP district even when
+/// they have underscore-only names (e.g. Playwright MCP registers
+/// `browser_close`, `browser_navigate`, etc. which the heuristic-only
+/// path silently falls through to "workshop"). Returns an empty set
+/// if the file is missing or malformed — categorization then falls
+/// back to the hyphen/`mcp` substring heuristic alone, which is the
+/// pre-allowlist behavior.
+fn load_mcp_tool_allowlist() -> HashSet<String> {
+    let mut allowlist = HashSet::new();
+    let Some(home) = home_dir() else {
+        return allowlist;
+    };
+    let path = home.join(".copilot").join("m-mcp-servers.json");
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return allowlist;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return allowlist;
+    };
+    let Some(servers) = value.get("servers").and_then(|v| v.as_object()) else {
+        return allowlist;
+    };
+    for (_server, info) in servers {
+        let Some(tools) = info.get("tools").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for tool in tools {
+            if let Some(name) = tool.as_str() {
+                allowlist.insert(name.to_ascii_lowercase());
+            }
+        }
+    }
+    allowlist
+}
+
+fn categorize_tool(tool_name: &str, mcp_allowlist: &HashSet<String>) -> &'static str {
     let name = tool_name.to_ascii_lowercase();
-    // MCP / external integration tools first. Copilot CLI's native
-    // tools (bash, view, edit, grep, glob, create, apply_patch, view,
-    // skill, task, ask_user, report_intent, exit_plan_mode, sql, ...)
-    // all use single words or underscore_only names. Anything with a
-    // hyphen, or with "mcp" in the name, is overwhelmingly an MCP
-    // server tool (github-mcp-server-*, context7-*, kit-dev-mcp-*,
-    // io-github-ChromeDevTools-..., azure-pricing, ide-get_diagnostics,
-    // ...) and belongs in its own bucket regardless of what verb it
-    // happens to use. Without this branch, github-mcp-server-* would
-    // route to Web/Docs alongside native web_fetch, and the rest would
-    // fall through to "workshop" and never appear in any district.
+    // 1. Authoritative MCP allowlist from ~/.copilot/m-mcp-servers.json.
+    //    Catches underscore-only MCP tool names (Playwright's
+    //    browser_close / browser_navigate / browser_evaluate / ...,
+    //    presentation server's add_slide_from_code, etc.) that the
+    //    pattern heuristic below would miss.
+    if mcp_allowlist.contains(&name) {
+        return "mcp";
+    }
+    // 2. Pattern heuristic for MCP tools not enumerated in the config
+    //    (wildcard tool registrations, MCP servers that connected
+    //    after the config was last read, etc.). Copilot CLI's native
+    //    tools (bash, view, edit, grep, glob, create, apply_patch,
+    //    view, skill, task, ask_user, report_intent, exit_plan_mode,
+    //    sql, ...) all use single words or underscore_only names.
+    //    Anything with a hyphen, or with "mcp" in the name, is
+    //    overwhelmingly an MCP server tool (github-mcp-server-*,
+    //    context7-*, kit-dev-mcp-*, io-github-ChromeDevTools-...,
+    //    azure-pricing, ide-get_diagnostics, ...) and belongs in its
+    //    own bucket regardless of what verb it happens to use.
     if name.contains("mcp") || name.contains('-') {
         return "mcp";
     }
@@ -1283,5 +1358,40 @@ mod tests {
         let mut sorted = counts.clone();
         sorted.sort_by(|a, b| b.cmp(a));
         assert_eq!(counts, sorted, "tools must remain sorted by count desc");
+    }
+
+    /// Tools registered by an MCP server but with underscore-only
+    /// names (Playwright's `browser_close`, `browser_navigate`,
+    /// presentation server's `add_slide_from_code`, etc.) used to fall
+    /// through the hyphen/`mcp` heuristic and land in "workshop"
+    /// — invisible in every district. The allowlist must override
+    /// that and route them to "mcp".
+    #[test]
+    fn mcp_allowlist_routes_underscore_only_tools() {
+        let mut allowlist = HashSet::new();
+        allowlist.insert("browser_close".to_string());
+        allowlist.insert("browser_navigate".to_string());
+        allowlist.insert("add_slide_from_code".to_string());
+
+        assert_eq!(categorize_tool("browser_close", &allowlist), "mcp");
+        assert_eq!(categorize_tool("browser_navigate", &allowlist), "mcp");
+        assert_eq!(categorize_tool("add_slide_from_code", &allowlist), "mcp");
+        // Case-insensitive match.
+        assert_eq!(categorize_tool("Browser_Close", &allowlist), "mcp");
+    }
+
+    /// Tools NOT in the allowlist and without hyphen/`mcp` markers
+    /// should still hit the original heuristic path (native Copilot
+    /// tools land in their proper districts).
+    #[test]
+    fn empty_allowlist_falls_back_to_heuristics() {
+        let allowlist = HashSet::new();
+        // Native Copilot tools — should hit the verb-based branches,
+        // not "mcp".
+        assert_eq!(categorize_tool("bash", &allowlist), "terminal");
+        assert_eq!(categorize_tool("view", &allowlist), "library");
+        assert_eq!(categorize_tool("edit", &allowlist), "forge");
+        // Hyphenated tool still routes to mcp via the heuristic.
+        assert_eq!(categorize_tool("github-mcp-server-list", &allowlist), "mcp");
     }
 }

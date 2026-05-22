@@ -178,6 +178,34 @@
       border-color: rgba(255, 213, 74, 0.85);
     }
 
+    /* Active model chip — shows the model id (e.g. "gpt-5.5") for the
+       currently-inspected session. Sits to the left of the theme
+       button; `margin-left: auto` shoves it (and the theme button)
+       all the way to the right side of the topbar. Hidden until the
+       scene reports a model so we never flash an empty pill on load. */
+    #model-chip {
+      margin-left: auto;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: lowercase;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(255, 213, 74, 0.12);
+      color: #ffd54a;
+      border: 1px solid rgba(255, 213, 74, 0.4);
+      white-space: nowrap;
+      max-width: 260px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #model-chip.empty { display: none; }
+    body.theme-light #model-chip {
+      background: rgba(184, 134, 11, 0.14);
+      color: #8a5d00;
+      border-color: rgba(184, 134, 11, 0.5);
+    }
+
     /* The Phaser canvas mounts inside #game and fills the area below
        the top bar. Tauri's window-state plugin restores window size on
        launch; Phaser scales to whatever the viewport ends up being. */
@@ -196,6 +224,7 @@
 <body>
   <div id="topbar">
     <span class="brand"><span class="crown">🏰</span> Kingdom of Agents</span>
+    <span id="model-chip" class="empty" title="Active model for the selected session"></span>
     <button id="theme-btn" type="button" title="Toggle light/dark theme">🌙</button>
   </div>
 
