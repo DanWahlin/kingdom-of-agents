@@ -884,19 +884,25 @@ export class CodeKingdomScene extends Phaser.Scene {
     // ellipse, the worst-case chord between adjacent districts is
     // ~0.87 * min(rx, ry). District sprite must be smaller than that
     // chord to avoid neighbour collisions, so derive sprite size from
-    // the smaller radius rather than from pure scene scale.
+    // the smaller radius rather than from pure scene scale. In focus
+    // mode we lift the absolute cap so the buildings can grow into
+    // the extra horizontal space the hidden side panels left behind;
+    // the chord limit still prevents overlap. The +25% bump is the
+    // largest that keeps the diagonal brackets clear of the cardinal
+    // ones on the bottom-heavy ellipse (labelStackH compensation).
     const rawRadiusX = wellW / 2;
     const rawRadiusY = wellH / 2;
     const minRingRadius = Math.min(rawRadiusX, rawRadiusY);
-    const districtR = Math.max(36, Math.min(64 * s, minRingRadius * 0.42));
+    const districtCap = this.panelsHidden ? 80 : 64;
+    const districtR = Math.max(36, Math.min(districtCap * s, minRingRadius * 0.42));
     const districtSize = districtR * 2;
 
     // Label + count text block below each district sprite occupies
-    // ~46*s + 14 + labelSize + countSize pixels (see drawDistricts).
-    // For typical s=1, labelSize=14, countSize=18 → ~92px. Reserve
-    // this on the bottom side of the ring so the bottom district's
-    // count text doesn't run into the inspector panel below the well.
-    const labelStackH = Math.round(46 * s + 14 + Math.max(14, districtR * 0.22) + Math.max(18, districtR * 0.26));
+    // ~46*pedestalUnit (halo bottom) + 14 + labelSize + countSize px
+    // (see drawDistricts). Using the same pedestalUnit (districtR/64)
+    // here as the halo math there means labels follow when focus-mode
+    // grows the sprites.
+    const labelStackH = Math.round(46 * (districtR / 64) + 14 + Math.max(14, districtR * 0.22) + Math.max(18, districtR * 0.26));
 
     const radiusX = Math.max(120, rawRadiusX - districtR);
     const radiusY = Math.max(100, rawRadiusY - Math.max(districtR, labelStackH));
@@ -1090,7 +1096,7 @@ export class CodeKingdomScene extends Phaser.Scene {
 
   private drawDistricts() {
     const layout = this.layout!;
-    const { centerX, centerY, s, districtSize, topLift } = layout;
+    const { centerX, centerY, s, districtSize, districtR, topLift } = layout;
     // Castle Y is biased slightly below centerY so the castle visually
     // sits inside the ring of buildings. Each district card also has a
     // ~38px label block below its sprite that pushes the *visible*
@@ -1133,10 +1139,15 @@ export class CodeKingdomScene extends Phaser.Scene {
       // skips the panel fill entirely, so the circles still read
       // directly against the kingdom backdrop.
       this.drawPixelPanel(district.x - size / 2, panelTop, size, frameH, district.color, focused, s);
+      // Halo circles scale with districtR (via pedestalUnit) instead of
+      // raw scene scale so they keep their visual proportion when
+      // focus-mode bumps the district sprite size. labelStackH in
+      // computeLayout uses the same unit so labels follow.
+      const pedestalUnit = districtR / 64;
       this.map.fillStyle(pedestalColor, outerAlpha);
-      this.map.fillCircle(district.x, district.y - 8 * s, 54 * s);
+      this.map.fillCircle(district.x, district.y - 8 * pedestalUnit, 54 * pedestalUnit);
       this.map.fillStyle(pedestalColor, innerAlpha);
-      this.map.fillCircle(district.x, district.y - 18 * s, 30 * s);
+      this.map.fillCircle(district.x, district.y - 18 * pedestalUnit, 30 * pedestalUnit);
       const texture = DISTRICT_TEXTURES[district.key] ?? 'ts-house-blue';
       const spriteW = size * 0.52;
       const spriteH = size * 0.74;
@@ -1148,9 +1159,10 @@ export class CodeKingdomScene extends Phaser.Scene {
       this.textObjects.push(sprite);
       const labelSize = Math.max(10, Math.round(size * 0.1));
       const countSize = Math.max(13, Math.round(size * 0.13));
-      // Place the label just below the visible halo (district.y + 46s)
-      // with a small breathing gap so text never overlaps the disc.
-      const labelY = district.y + 46 * s + 8 + labelSize / 2;
+      // Place the label just below the visible halo (which now scales
+      // with districtR via pedestalUnit) with a small breathing gap so
+      // text never overlaps the disc.
+      const labelY = district.y + 46 * pedestalUnit + 8 + labelSize / 2;
       const countY = labelY + labelSize / 2 + 6 + countSize / 2;
       const countColor = colorToCss(districtTextColor(district.color));
       this.addText(district.x, labelY, district.short, labelSize, theme.text).setOrigin(0.5);
@@ -1233,7 +1245,11 @@ export class CodeKingdomScene extends Phaser.Scene {
     const moatHeadroom = layout
       ? Math.max(60, ringHalf - layout.districtR - districtRingGap) / 132
       : Infinity;
-    const castleCap = 0.78;
+    // Focus mode lifts the absolute cap so the castle can grow into
+    // the larger ring without being dwarfed by the now-bigger
+    // district buildings. moatHeadroom still keeps it from touching
+    // the surrounding districts.
+    const castleCap = this.panelsHidden ? 1.1 : 0.78;
     const castleScale = layout
       ? Math.min(s, (layout.districtSize / 132) * 1.05, moatHeadroom, castleCap)
       : Math.min(s, castleCap);
