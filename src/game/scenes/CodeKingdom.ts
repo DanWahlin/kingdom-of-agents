@@ -258,10 +258,11 @@ const DISTRICT_COLORS: Record<KingdomCategory, number> = {
 /// Intent). Scaled down with the layout in `buildDistricts`.
 const DIAGONAL_DISTRICT_SHIFT_PX = 22;
 
-/// Hit radius (px) used by `updateHoveredDistrict` to detect the cursor
-/// over a district sprite. Slightly larger than the rendered icon so the
-/// inspector tracks pointer intent rather than pixel-perfect targeting.
-const DISTRICT_HOVER_RADIUS_PX = 62;
+/// Minimum hit radius (px) used by `updateHoveredDistrict`. Acts as a
+/// floor under `layout.districtR` so the smallest compact viewport
+/// still has a forgiving hover area instead of requiring pixel-perfect
+/// targeting on tiny district icons.
+const DISTRICT_HOVER_RADIUS_MIN_PX = 48;
 
 /// Stagger between sequential event pulses fired by `ingestActivityEvents`.
 /// Keeps a burst of N events from looking like a single blob — each one
@@ -1613,37 +1614,57 @@ export class CodeKingdomScene extends Phaser.Scene {
     // Scrollbar — only render when there's overflow. Track + thumb +
     // up/down nudge buttons. Wheel events also scroll (see input setup).
     if (calls.length > maxRows) {
-      const sbX = x + w - scrollbarW - scrollGutter;
-      const arrowH = 18;
-      const sbTrackY = rowY0 + arrowH + 2;
-      const sbTrackH = (rowY0 + maxRows * rowH) - sbTrackY - arrowH - 4;
-      // Up arrow button
-      g.fillStyle(0x1a2448, 0.95);
-      g.fillRoundedRect(sbX, rowY0, scrollbarW, arrowH, 4);
-      g.lineStyle(1, cssToHex('#a5b1d8'), 0.6);
-      g.strokeRoundedRect(sbX, rowY0, scrollbarW, arrowH, 4);
-      this.addText(sbX + scrollbarW / 2, rowY0 + arrowH / 2 - 1, '▲', 9, theme.text).setOrigin(0.5, 0.5).setDepth(TD);
-      this.transcriptScrollUpRect = { x: sbX, y: rowY0, w: scrollbarW, h: arrowH };
-      // Track
-      g.fillStyle(0x1a2448, 0.5);
-      g.fillRoundedRect(sbX, sbTrackY, scrollbarW, sbTrackH, 4);
-      // Thumb
-      const thumbH = Math.max(20, sbTrackH * (maxRows / calls.length));
-      const thumbY = sbTrackY + (sbTrackH - thumbH) * (offset / Math.max(1, maxOffset));
-      g.fillStyle(cssToHex('#a5b1d8'), 0.85);
-      g.fillRoundedRect(sbX + 2, thumbY, scrollbarW - 4, thumbH, 3);
-      // Down arrow button
-      const downY = sbTrackY + sbTrackH + 2;
-      g.fillStyle(0x1a2448, 0.95);
-      g.fillRoundedRect(sbX, downY, scrollbarW, arrowH, 4);
-      g.lineStyle(1, cssToHex('#a5b1d8'), 0.6);
-      g.strokeRoundedRect(sbX, downY, scrollbarW, arrowH, 4);
-      this.addText(sbX + scrollbarW / 2, downY + arrowH / 2 - 1, '▼', 9, theme.text).setOrigin(0.5, 0.5).setDepth(TD);
-      this.transcriptScrollDownRect = { x: sbX, y: downY, w: scrollbarW, h: arrowH };
+      this.drawTranscriptScrollbar(x + w, rowY0, maxRows, rowH, scrollbarW, scrollGutter, calls.length, maxOffset, offset, TD);
     } else {
       this.transcriptScrollUpRect = null;
       this.transcriptScrollDownRect = null;
     }
+  }
+
+  /// Renders the transcript overlay's scrollbar (up arrow, track, thumb,
+  /// down arrow) and updates the cached click rects used by
+  /// `handlePointerDown`. Caller is responsible for the overflow check —
+  /// this method assumes the scrollbar is needed.
+  private drawTranscriptScrollbar(
+    panelRight: number,
+    rowY0: number,
+    maxRows: number,
+    rowH: number,
+    scrollbarW: number,
+    scrollGutter: number,
+    rowCount: number,
+    maxOffset: number,
+    offset: number,
+    depth: number,
+  ) {
+    const g = this.overlay;
+    const sbX = panelRight - scrollbarW - scrollGutter;
+    const arrowH = 18;
+    const sbTrackY = rowY0 + arrowH + 2;
+    const sbTrackH = (rowY0 + maxRows * rowH) - sbTrackY - arrowH - 4;
+    // Up arrow button
+    g.fillStyle(0x1a2448, 0.95);
+    g.fillRoundedRect(sbX, rowY0, scrollbarW, arrowH, 4);
+    g.lineStyle(1, cssToHex('#a5b1d8'), 0.6);
+    g.strokeRoundedRect(sbX, rowY0, scrollbarW, arrowH, 4);
+    this.addText(sbX + scrollbarW / 2, rowY0 + arrowH / 2 - 1, '▲', 9, theme.text).setOrigin(0.5, 0.5).setDepth(depth);
+    this.transcriptScrollUpRect = { x: sbX, y: rowY0, w: scrollbarW, h: arrowH };
+    // Track
+    g.fillStyle(0x1a2448, 0.5);
+    g.fillRoundedRect(sbX, sbTrackY, scrollbarW, sbTrackH, 4);
+    // Thumb — height proportional to viewport coverage, y mapped to scroll fraction.
+    const thumbH = Math.max(20, sbTrackH * (maxRows / rowCount));
+    const thumbY = sbTrackY + (sbTrackH - thumbH) * (offset / Math.max(1, maxOffset));
+    g.fillStyle(cssToHex('#a5b1d8'), 0.85);
+    g.fillRoundedRect(sbX + 2, thumbY, scrollbarW - 4, thumbH, 3);
+    // Down arrow button
+    const downY = sbTrackY + sbTrackH + 2;
+    g.fillStyle(0x1a2448, 0.95);
+    g.fillRoundedRect(sbX, downY, scrollbarW, arrowH, 4);
+    g.lineStyle(1, cssToHex('#a5b1d8'), 0.6);
+    g.strokeRoundedRect(sbX, downY, scrollbarW, arrowH, 4);
+    this.addText(sbX + scrollbarW / 2, downY + arrowH / 2 - 1, '▼', 9, theme.text).setOrigin(0.5, 0.5).setDepth(depth);
+    this.transcriptScrollDownRect = { x: sbX, y: downY, w: scrollbarW, h: arrowH };
   }
 
   private drawReplayTimeline(x: number, y: number, w: number, h: number) {
@@ -1808,12 +1829,16 @@ export class CodeKingdomScene extends Phaser.Scene {
   private updateHoveredDistrict() {
     if (this.districts.length === 0 || !this.input?.activePointer) return;
     const pointer = this.input.activePointer;
+    // Hit area tracks the rendered district size (`districtR`) so the
+    // hover region scales with the viewport. A 48px floor prevents the
+    // tiny-window layout from becoming pixel-perfect-only.
+    const hitR = Math.max(DISTRICT_HOVER_RADIUS_MIN_PX, this.layout?.districtR ?? DISTRICT_HOVER_RADIUS_MIN_PX);
     let next = -1;
     for (let i = 0; i < this.districts.length; i++) {
       const district = this.districts[i];
       const dx = pointer.x - district.x;
       const dy = pointer.y - district.y;
-      if (Math.sqrt(dx * dx + dy * dy) <= DISTRICT_HOVER_RADIUS_PX) {
+      if (Math.sqrt(dx * dx + dy * dy) <= hitR) {
         next = i;
         break;
       }

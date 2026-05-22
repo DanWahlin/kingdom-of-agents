@@ -1144,3 +1144,144 @@ fn is_relevant_path(path: &Path) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Build a synthetic `ProviderScan` containing only the supplied
+    /// tool counts. Other fields are zeroed out — these tests only
+    /// exercise the tool truncation path.
+    fn scan_with_tools(entries: &[(&str, &str, usize)]) -> ProviderScan {
+        let mut tool_counts: BTreeMap<(String, String), usize> = BTreeMap::new();
+        for (name, category, count) in entries {
+            tool_counts.insert(((*name).to_string(), (*category).to_string()), *count);
+        }
+        ProviderScan {
+            provider: "test",
+            available: true,
+            sessions: Vec::new(),
+            tool_counts,
+            recent_events: Vec::new(),
+            alerts: Vec::new(),
+            total_events: 0,
+            total_tool_calls: 0,
+            total_output_tokens: 0,
+            total_input_tokens: 0,
+            total_turns: 0,
+            active_sessions: 0,
+            scanned_sessions: 0,
+        }
+    }
+
+    /// Regression: chatty categories (bash/edit/view) used to take all
+    /// MAX_TOOLS slots, dropping low-count MCP/web/agents entries from
+    /// the renderer's `tools` array entirely. The two-pass truncation
+    /// in `merge_scans` must keep at least one entry per active
+    /// category when slots allow.
+    #[test]
+    fn long_tail_categories_survive_chatty_domination() {
+        let scan = scan_with_tools(&[
+            // Chatty: terminal + library with many high-count entries
+            ("bash", "terminal", 50),
+            ("zsh", "terminal", 40),
+            ("fish", "terminal", 30),
+            ("sh", "terminal", 20),
+            ("posh", "terminal", 15),
+            ("dash", "terminal", 10),
+            ("view", "library", 45),
+            ("grep", "library", 35),
+            ("rg", "library", 25),
+            ("fd", "library", 20),
+            ("find", "library", 15),
+            ("ls", "library", 12),
+            // Long-tail: a single low-count MCP tool that the OLD merger
+            // would have dropped.
+            ("mcp-deepwiki-ask", "mcp", 1),
+            ("github-mcp-server-list", "mcp", 2),
+        ]);
+
+        let activity = merge_scans(vec![scan]);
+        let mcp_tools: Vec<&AgentToolMetric> =
+            activity.tools.iter().filter(|t| t.category == "mcp").collect();
+        assert!(
+            !mcp_tools.is_empty(),
+            "MCP tools must survive truncation even when terminal/library dominate; \
+             got tools = {:?}",
+            activity.tools.iter().map(|t| (&t.name, &t.category, t.count)).collect::<Vec<_>>()
+        );
+    }
+
+    /// Within each category the per-category cap must not exceed
+    /// MAX_TOOLS_PER_CATEGORY *when other categories are competing for
+    /// slots*. (When only one category exists, the pass-2 top-up
+    /// intentionally fills slack with leftovers regardless of category
+    /// — that's not starvation, it's just no long tail to protect.)
+    #[test]
+    fn per_category_cap_is_enforced_under_contention() {
+        let mut entries: Vec<(&str, &str, usize)> = (0..20)
+            .map(|i| {
+                let name: &'static str = Box::leak(format!("bash-{}", i).into_boxed_str());
+                (name, "terminal", 100 - i)
+            })
+            .collect();
+        // Add competing categories so the top-up has somewhere to go
+        // besides terminal. Without these, pass 2 fills slack with
+        // leftover terminal tools (which is correct — there's no long
+        // tail to protect).
+        entries.push(("view", "library", 5));
+        entries.push(("rg", "library", 4));
+        entries.push(("github-mcp-list", "mcp", 1));
+        entries.push(("github-mcp-search", "mcp", 1));
+        entries.push(("web-fetch", "signal", 2));
+
+        let scan = scan_with_tools(&entries);
+        let activity = merge_scans(vec![scan]);
+        let terminal_count = activity.tools.iter().filter(|t| t.category == "terminal").count();
+        assert!(
+            terminal_count <= MAX_TOOLS_PER_CATEGORY,
+            "terminal got {} entries under contention, expected <= {}",
+            terminal_count,
+            MAX_TOOLS_PER_CATEGORY
+        );
+    }
+
+    /// When slack exists after the per-category pass, the merger should
+    /// top up the survivor list with the highest-count leftovers up to
+    /// MAX_TOOLS so the global payload isn't unnecessarily small.
+    #[test]
+    fn second_pass_tops_up_to_max_tools() {
+        // 6 terminal tools — only 5 pass the per-category cap. The 6th
+        // would normally be dropped, but with no other categories to
+        // fill MAX_TOOLS, the leftover top-up should rescue it.
+        let scan = scan_with_tools(&[
+            ("a", "terminal", 60),
+            ("b", "terminal", 50),
+            ("c", "terminal", 40),
+            ("d", "terminal", 30),
+            ("e", "terminal", 20),
+            ("f", "terminal", 10),
+            ("g", "terminal", 5),
+        ]);
+        let activity = merge_scans(vec![scan]);
+        // The category cap floor is `1 * 5 = 5`, so MAX_TOOLS (10) wins
+        // → survivors should saturate at 7 (all the tools we provided).
+        assert_eq!(activity.tools.len(), 7);
+    }
+
+    /// Sort order must remain by count desc after truncation so the
+    /// renderer's "top tool" call-out is always the most-used entry.
+    #[test]
+    fn truncation_preserves_count_desc_order() {
+        let scan = scan_with_tools(&[
+            ("rare", "mcp", 1),
+            ("common", "terminal", 100),
+            ("medium", "library", 50),
+        ]);
+        let activity = merge_scans(vec![scan]);
+        let counts: Vec<usize> = activity.tools.iter().map(|t| t.count).collect();
+        let mut sorted = counts.clone();
+        sorted.sort_by(|a, b| b.cmp(a));
+        assert_eq!(counts, sorted, "tools must remain sorted by count desc");
+    }
+}

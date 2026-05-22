@@ -99,6 +99,8 @@ async function getKingdomState(page: Page) {
       districtRects: (scene.districts ?? []).map((d: any) => ({
         key: d.key, x: d.x, y: d.y,
       })),
+      inspectedDistrictKey: scene.inspectedDistrictKey ?? null,
+      hoveredDistrictIndex: scene.hoveredDistrictIndex ?? -1,
     };
   });
 }
@@ -146,11 +148,49 @@ test.describe('Kingdom of Agents — Dashboard', () => {
     expect(state!.sessionCount).toBe(3);
   });
 
-  test('recent events animate as pulses from the castle', async ({ page }) => {
+  test('bootstrap suppresses live pulses so historical events do not animate', async ({ page }) => {
+    // The 4 events in KINGDOM_FIXTURE.recent_events are the snapshot
+    // history — they were already counted by the backend. Animating
+    // them as "live" pulses on cold start makes boxes flow into
+    // buildings while the 24h badge counts never change, which reads
+    // as "is anything actually working?". The bootstrapCompleted flag
+    // gates the pulse queue so initial ingest is silent.
     await page.waitForTimeout(800);
     const state = await getKingdomState(page);
-    expect(state!.activeEventPulseCount).toBeGreaterThanOrEqual(0);
-    expect(state!.sessionCount).toBe(3);
+    expect(state!.activeEventPulseCount).toBe(0);
+    // Badges only increment from arrived live pulses, so they should
+    // stay empty during bootstrap.
+    expect(Object.keys(state!.districtEventBadges).length).toBe(0);
+    // Replay log still ingested the events — just without pulses.
+    expect(state!.replayState.total).toBe(4);
+  });
+
+  test('post-bootstrap watcher push queues live pulses for new events', async ({ page }) => {
+    // Wait for bootstrap to fully settle.
+    await page.waitForTimeout(800);
+    // Inject a NEW event into the fixture and trigger the watcher
+    // hook the Rust backend uses (window.__koaOnAgentActivityChanged).
+    // bootstrapCompleted is now true → pulses should fire.
+    const queued = await page.evaluate(() => {
+      const fixture = (window as any).__kingdomFixture;
+      const newEvent = {
+        session_id: 'alpha123',
+        timestamp: new Date().toISOString(),
+        kind: 'tool.execution_start',
+        tool: 'bash',
+        category: 'terminal',
+        success: true,
+      };
+      fixture.recent_events = [newEvent, ...fixture.recent_events];
+      (window as any).__koaOnAgentActivityChanged?.();
+      return true;
+    });
+    expect(queued).toBe(true);
+    // Pulses are queued with PULSE_STAGGER_MS delay and ~900ms duration
+    // — sample mid-flight before they arrive.
+    await page.waitForTimeout(250);
+    const mid = await getKingdomState(page);
+    expect(mid!.activeEventPulseCount).toBeGreaterThan(0);
   });
 
   test('replay timeline ingests events into the log and stays live by default', async ({ page }) => {
@@ -207,6 +247,74 @@ test.describe('Kingdom of Agents — Dashboard', () => {
 
     const after = await getKingdomState(page);
     expect(after!.selectedSessionId).toBe('alpha123');
+  });
+
+  test('hovering a district makes it the sticky-inspected district and persists across reload', async ({ page }) => {
+    // Move the pointer into a known district (Library / Reads). The
+    // sticky-hover model promotes whatever the cursor enters into
+    // `inspectedDistrictKey` and persists it to localStorage so the
+    // inspector resumes on the same district after a window restart.
+    const before = await getKingdomState(page);
+    const library = before!.districtRects.find((d: any) => d.key === 'library');
+    expect(library).toBeTruthy();
+
+    const off = await canvasOffset(page);
+    await page.mouse.move(off.x + library.x, off.y + library.y);
+    // updateHoveredDistrict runs on Phaser's update() tick; give it a
+    // few frames to register the new hover position.
+    await page.waitForTimeout(150);
+
+    const hovered = await getKingdomState(page);
+    expect(hovered!.inspectedDistrictKey).toBe('library');
+    expect(hovered!.hoveredDistrictIndex).toBeGreaterThanOrEqual(0);
+
+    // Move the pointer OUT of the ring. The sticky-hover model
+    // intentionally KEEPS `inspectedDistrictKey` pointing at library —
+    // that's the whole point. The hover index should clear back to -1.
+    await page.mouse.move(off.x + 5, off.y + 5);
+    await page.waitForTimeout(150);
+    const released = await getKingdomState(page);
+    expect(released!.hoveredDistrictIndex).toBe(-1);
+    expect(released!.inspectedDistrictKey).toBe('library');
+
+    // Verify it was written to localStorage under the new key.
+    const stored = await page.evaluate(() => {
+      const raw = window.localStorage.getItem('koa_prefs');
+      return raw ? JSON.parse(raw) : null;
+    });
+    expect(stored).toBeTruthy();
+    expect(stored.inspectedDistrictKey).toBe('library');
+
+    // Reload and confirm the scene restores the sticky district.
+    await page.reload();
+    await waitForGame(page);
+    const restored = await getKingdomState(page);
+    expect(restored!.inspectedDistrictKey).toBe('library');
+  });
+
+  test('loadKingdomPrefs migrates legacy pinnedDistrictKey to inspectedDistrictKey', async ({ page }) => {
+    // Seed localStorage with the legacy pinned-district pref BEFORE the
+    // scene boots so loadKingdomPrefs has a chance to migrate it.
+    await page.addInitScript(() => {
+      window.localStorage.setItem('koa_prefs', JSON.stringify({
+        pinnedDistrictKey: 'court',
+        replayPaused: false,
+      }));
+    });
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    const state = await getKingdomState(page);
+    expect(state!.inspectedDistrictKey).toBe('court');
+
+    // The legacy field must be deleted after migration so it doesn't
+    // linger in storage forever.
+    const stored = await page.evaluate(() => {
+      const raw = window.localStorage.getItem('koa_prefs');
+      return raw ? JSON.parse(raw) : null;
+    });
+    expect(stored.pinnedDistrictKey).toBeUndefined();
+    expect(stored.inspectedDistrictKey).toBe('court');
   });
 });
 
