@@ -1061,7 +1061,6 @@ export class CodeKingdomScene extends Phaser.Scene {
       const selected = i === this.selectedDistrict;
       const hovered = i === this.hoveredDistrictIndex;
       const focused = selected || hovered;
-      const idle = district.count === 0;
       const size = districtSize;
       const panelTop = district.y - size / 2;
       // Extend the corner frame downward so the label + count sit cleanly
@@ -1070,21 +1069,16 @@ export class CodeKingdomScene extends Phaser.Scene {
       const labelBlockH = Math.round(38 * Math.max(s, 0.85));
       const frameH = size + labelBlockH;
       const light = theme.mode === 'light';
-      // Colored pedestal under each building. Idle districts (no 24h
-      // activity) drop to a near-grey wash so the dashboard naturally
-      // foregrounds whatever is actually working *now*. Dark-mode
-      // alphas have to be substantially higher than light-mode ones
-      // because color tinted over near-black at low alpha is nearly
-      // invisible — even at the same alpha as light mode, the result
-      // reads darker because the canvas drags the value down. Both
-      // outer (the wider halo) and inner (the brighter core) use
-      // bumped values for parity with the soft pastel that light
-      // mode produces.
       const liveOuter = light ? (focused ? 0.55 : 0.34) : (focused ? 0.7 : 0.5);
       const liveInner = light ? (focused ? 0.78 : 0.55) : (focused ? 0.92 : 0.75);
-      const outerAlpha = idle ? (light ? 0.10 : 0.18) : liveOuter;
-      const innerAlpha = idle ? (light ? 0.16 : 0.28) : liveInner;
-      const pedestalColor = idle ? (light ? 0x9aa6c3 : 0x3a4564) : district.color;
+      // Every district renders with the same colored pedestal regardless
+      // of 24h activity count. We used to dim idle districts to a grey
+      // wash, but that read as a visual "bug" against the surrounding
+      // active districts — the activity badge in the corner already
+      // signals zero activity, so the desaturation was redundant noise.
+      const outerAlpha = liveOuter;
+      const innerAlpha = liveInner;
+      const pedestalColor = district.color;
       // Draw the panel/backdrop FIRST so the colored pedestal circles
       // can layer on top of it in dark mode. (Previously the outer
       // circle was drawn first and then the near-opaque dark panel
@@ -1092,7 +1086,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       // visible in light mode disappeared in dark mode.) Light mode
       // skips the panel fill entirely, so the circles still read
       // directly against the kingdom backdrop.
-      this.drawPixelPanel(district.x - size / 2, panelTop, size, frameH, district.color, focused, s, idle);
+      this.drawPixelPanel(district.x - size / 2, panelTop, size, frameH, district.color, focused, s);
       this.map.fillStyle(pedestalColor, outerAlpha);
       this.map.fillCircle(district.x, district.y - 8 * s, 54 * s);
       this.map.fillStyle(pedestalColor, innerAlpha);
@@ -1103,7 +1097,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       const sprite = this.add.image(district.x, panelTop + size * 0.36, texture)
         .setOrigin(0.5, 0.62)
         .setDepth(7)
-        .setAlpha(idle ? 0.55 : (focused ? 1 : 0.9));
+        .setAlpha(focused ? 1 : 0.9);
       sprite.setDisplaySize(spriteW, spriteH);
       this.textObjects.push(sprite);
       const labelSize = Math.max(10, Math.round(size * 0.1));
@@ -1112,14 +1106,13 @@ export class CodeKingdomScene extends Phaser.Scene {
       // with a small breathing gap so text never overlaps the disc.
       const labelY = district.y + 46 * s + 8 + labelSize / 2;
       const countY = labelY + labelSize / 2 + 6 + countSize / 2;
-      const labelColor = idle ? theme.muted : theme.text;
-      const countColor = idle ? theme.muted : colorToCss(districtTextColor(district.color));
-      this.addText(district.x, labelY, district.short, labelSize, labelColor).setOrigin(0.5);
+      const countColor = colorToCss(districtTextColor(district.color));
+      this.addText(district.x, labelY, district.short, labelSize, theme.text).setOrigin(0.5);
       this.addText(district.x, countY, String(district.count), countSize, countColor).setOrigin(0.5);
     }
   }
 
-  private drawPixelPanel(x: number, y: number, w: number, h: number, color: number, focused: boolean, s: number, idle = false) {
+  private drawPixelPanel(x: number, y: number, w: number, h: number, color: number, focused: boolean, s: number) {
     const px = snap(x);
     const py = snap(y);
     const pw = snap(w);
@@ -1137,16 +1130,12 @@ export class CodeKingdomScene extends Phaser.Scene {
       this.map.fillRect(px + notch, py, pw - notch * 2, ph);
       this.map.fillRect(px, py + notch, pw, ph - notch * 2);
     }
-    // Idle districts (no 24h activity) drop to a muted slate so they
-    // visually recede. Active districts in light mode use a darkened
-    // bracket color — the raw district hues (light cyan, soft yellow,
-    // lavender) wash out on a white backdrop at full saturation.
-    const bracketColor = idle
-      ? (theme.mode === 'light' ? 0x8896b6 : 0x44507a)
-      : theme.mode === 'light'
-        ? darkenColor(color, 0.55)
-        : color;
-    const bracketAlpha = idle ? 0.55 : (focused ? 1 : 0.9);
+    // Bracket color: in light mode the raw district hues (light cyan,
+    // soft yellow, lavender) wash out at full saturation on a white
+    // backdrop, so they get darkened. In dark mode the hues read fine
+    // as-is.
+    const bracketColor = theme.mode === 'light' ? darkenColor(color, 0.55) : color;
+    const bracketAlpha = focused ? 1 : 0.9;
     this.map.fillStyle(bracketColor, bracketAlpha);
     this.map.fillRect(px + notch, py, pw - notch * 2, border);
     this.map.fillRect(px + notch, py + ph - border, pw - notch * 2, border);
@@ -1495,7 +1484,20 @@ export class CodeKingdomScene extends Phaser.Scene {
       const titleEnd = x + w - idWidth - hashRightInset - 8;
       const titleChars = Math.max(10, Math.floor((titleEnd - titleStart) / 12));
       this.addText(titleStart, rowY + 9, truncate(session.title || session.id, titleChars), 12, theme.text).setOrigin(0, 0.5);
-      this.addText(x + w - hashRightInset, rowY + 9, idLabel, 10, theme.muted).setOrigin(1, 0.5);
+      // Hash chip: dark pill behind the id so it stays readable against
+      // any row tint (the selected-row fill can be green, yellow, or
+      // red depending on session.status, and a plain muted-grey hash
+      // washes out against the lighter tints). The chip width is
+      // derived from the monospace-advance estimate that drives the
+      // truncation math above; the +12 padding mirrors what looks
+      // natural alongside the 10 px id text.
+      const hashChipW = idWidth + 12;
+      const hashChipH = 18;
+      const hashChipX = x + w - hashRightInset - hashChipW + 6;
+      const hashChipY = rowY + 9 - hashChipH / 2;
+      this.ui.fillStyle(0x020713, theme.mode === 'light' ? 0.6 : 0.7);
+      this.ui.fillRoundedRect(hashChipX, hashChipY, hashChipW, hashChipH, 4);
+      this.addText(x + w - hashRightInset, rowY + 9, idLabel, 10, '#e6ecf8').setOrigin(1, 0.5);
       this.sessionPickerRows.push({ id: session.id, x: x + 18, y: rowY - 4, w: w - 36, h: 26 });
     }
     const extraActive = pickerOptions.length - visibleSessions.length;
