@@ -59,7 +59,7 @@ npx playwright test tests/code-kingdom.spec.ts # scene tests only
 npx playwright test --headed                   # visible browser
 ```
 
-The Playwright `webServer` config serves `dist/` over `python3 -m http.server 4173`. The current suite is **26 tests** covering startup, dashboard panels, replay/scrubber, session selection, ops mode classification, and a six-viewport layout regression.
+The Playwright `webServer` config serves `dist/` over `python3 -m http.server 4173`. The current suite is **27 tests** covering startup, dashboard panels, replay/scrubber, session selection, ops mode classification, and a six-viewport layout regression.
 
 ## Key Patterns
 

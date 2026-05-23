@@ -1,5 +1,5 @@
 name: ✨ Feature Request
-description: Suggest a new feature, district, or improvement for Kingdom of Agents
+description: Suggest a new feature, quarter, or improvement for Kingdom of Agents
 labels: ["enhancement"]
 body:
   - type: textarea

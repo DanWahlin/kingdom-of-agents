@@ -154,7 +154,7 @@
   // -------------------------------------------------------------------
   // Panels toggle — hide/show the Summary + Selected Session + Activity
   // Feed side panels so the castle/buildings ring can expand to take up
-  // the full width. The district inspector below the buildings + the
+  // the full width. The quarter inspector below the buildings + the
   // replay timeline stay visible so hover/click behavior + scrubber
   // controls keep working in focus mode.
   // -------------------------------------------------------------------

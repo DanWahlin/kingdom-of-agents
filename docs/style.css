@@ -580,7 +580,7 @@ code {
   font-size: 1.05rem;
 }
 
-/* ---------- District cards (replaces game cards) ---------- */
+/* ---------- Quarter cards (replaces game cards) ---------- */
 .games-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
@@ -609,7 +609,7 @@ code {
 
 .game-card:hover .game-card-glow { opacity: 1; }
 
-/* Per-district accent colors mirror the in-app district colors. */
+/* Per-quarter accent colors mirror the in-app quarter colors. */
 .forge    .game-card-glow { background: radial-gradient(ellipse at 30% 20%, rgba(255,143,80,0.10), transparent 70%); }
 .forge:hover    { box-shadow: 0 0 40px rgba(255,143,80,0.12), 0 20px 50px rgba(0,0,0,0.4); }
 
@@ -655,7 +655,7 @@ code {
   color: var(--white);
 }
 
-.district-sub {
+.quarter-sub {
   color: var(--white-dim);
   font-weight: 500;
   font-size: 0.78em;
@@ -684,7 +684,7 @@ code {
   font-size: 0.95rem;
 }
 
-.district-tools {
+.quarter-tools {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;

@@ -10,9 +10,9 @@ Built with [Tauri 2](https://v2.tauri.app/), [Phaser 4](https://phaser.io/), and
 
 ## What it does
 
-Kingdom of Agents reads the local session state Copilot CLI already writes under `~/.copilot/session-state/` and turns each session into a district in a small medieval kingdom:
+Kingdom of Agents reads the local session state Copilot CLI already writes under `~/.copilot/session-state/` and turns each session into a quarter in a small medieval kingdom:
 
-| District | What it tracks |
+| Quarter | What it tracks |
 |----------|----------------|
 | **Forge** (Edits) | File writes / `apply_patch` calls |
 | **Library** (Reads) | Reads / search / `view` calls |
@@ -60,7 +60,7 @@ The frontend mounts at `dist/game/index.html` and Playwright serves it via `pyth
 
 - **`src-tauri/src/agent.rs`** — `AgentProvider` trait + `CopilotProvider` impl. Scans `~/.copilot/session-state/`, normalizes events, and watches the directory with `notify = 8` so the UI updates within ~300 ms of any change. Returns only allowlisted fields.
 - **`src-tauri/src/lib.rs`** — Tauri commands (`get_agent_activity`, `open_in_editor`, etc.) and the tray icon. Uses `tauri-plugin-window-state` to persist window size/position across launches.
-- **`src/game/scenes/CodeKingdom.ts`** — the single Phaser scene. Renders districts, ops panel, replay timeline, session inspector, and the Tiny Swords assets in `assets/kingdom/tiny-swords/`.
+- **`src/game/scenes/CodeKingdom.ts`** — the single Phaser scene. Renders quarters, ops panel, replay timeline, session inspector, and the Tiny Swords assets in `assets/kingdom/tiny-swords/`.
 - **`src/game/game.ts`** — minimal Phaser bootstrap. One scene, opaque background, resizes with the window.
 - **`src/game/index.html` + `hud.js`** — slim 32 px top bar with brand, panels toggle, and theme toggle.
 

@@ -65,11 +65,11 @@ async function getKingdomState(page: Page) {
       activeSessions: scene.activity?.active_sessions,
       toolCalls: scene.activity?.total_tool_calls,
       sessionCount: scene.activity?.sessions?.length ?? 0,
-      districtCount: scene.districts?.length ?? 0,
+      quarterCount: scene.quarters?.length ?? 0,
       selectedSessionId: scene.selectedSession?.id,
       sessionPickerRows: scene.sessionPickerRows ?? [],
       activeEventPulseCount: scene.activeEventPulseCount ?? 0,
-      districtEventBadges: scene.districtEventBadges ?? {},
+      quarterEventBadges: scene.quarterEventBadges ?? {},
       replayState: scene.replayState ?? { paused: false, cursor: 0, total: 0, atLive: true },
       replayPlayButton: scene.replayPlayButtonRect ?? null,
       replayLiveButton: scene.replayLiveButtonRect ?? null,
@@ -92,14 +92,14 @@ async function getKingdomState(page: Page) {
         bottomH: scene.layout.bottomH,
         inspectorX: scene.layout.inspectorX,
         inspectorW: scene.layout.inspectorW,
-        districtR: scene.layout.districtR,
+        quarterR: scene.layout.quarterR,
         compact: scene.layout.compact,
       } : null,
-      districtRects: (scene.districts ?? []).map((d: any) => ({
+      quarterRects: (scene.quarters ?? []).map((d: any) => ({
         key: d.key, x: d.x, y: d.y,
       })),
-      inspectedDistrictKey: scene.inspectedDistrictKey ?? null,
-      hoveredDistrictIndex: scene.hoveredDistrictIndex ?? -1,
+      inspectedQuarterKey: scene.inspectedQuarterKey ?? null,
+      hoveredQuarterIndex: scene.hoveredQuarterIndex ?? -1,
     };
   });
 }
@@ -120,7 +120,7 @@ test.describe('Kingdom of Agents — Startup', () => {
     expect(state!.activeSessions).toBe(2);
     expect(state!.toolCalls).toBe(47);
     expect(state!.sessionCount).toBe(3);
-    expect(state!.districtCount).toBe(8);
+    expect(state!.quarterCount).toBe(8);
     expect(state!.scannedSessions).toBe(3);
     expect(state!.insightLabels).toContain('Tokens · 24h');
     expect(state!.opsAttention).toBe('review');
@@ -159,7 +159,7 @@ test.describe('Kingdom of Agents — Dashboard', () => {
     expect(state!.activeEventPulseCount).toBe(0);
     // Badges only increment from arrived live pulses, so they should
     // stay empty during bootstrap.
-    expect(Object.keys(state!.districtEventBadges).length).toBe(0);
+    expect(Object.keys(state!.quarterEventBadges).length).toBe(0);
     // Replay log still ingested the events — just without pulses.
     expect(state!.replayState.total).toBe(4);
   });
@@ -284,33 +284,33 @@ test.describe('Kingdom of Agents — Dashboard', () => {
     await expect(page.locator('#model-chip')).toHaveText('');
   });
 
-  test('hovering a district makes it the sticky-inspected district and persists across reload', async ({ page }) => {
-    // Move the pointer into a known district (Library / Reads). The
+  test('hovering a quarter makes it the sticky-inspected quarter and persists across reload', async ({ page }) => {
+    // Move the pointer into a known quarter (Library / Reads). The
     // sticky-hover model promotes whatever the cursor enters into
-    // `inspectedDistrictKey` and persists it to localStorage so the
-    // inspector resumes on the same district after a window restart.
+    // `inspectedQuarterKey` and persists it to localStorage so the
+    // inspector resumes on the same quarter after a window restart.
     const before = await getKingdomState(page);
-    const library = before!.districtRects.find((d: any) => d.key === 'library');
+    const library = before!.quarterRects.find((d: any) => d.key === 'library');
     expect(library).toBeTruthy();
 
     const off = await canvasOffset(page);
     await page.mouse.move(off.x + library.x, off.y + library.y);
-    // updateHoveredDistrict runs on Phaser's update() tick; give it a
+    // updateHoveredQuarter runs on Phaser's update() tick; give it a
     // few frames to register the new hover position.
     await page.waitForTimeout(150);
 
     const hovered = await getKingdomState(page);
-    expect(hovered!.inspectedDistrictKey).toBe('library');
-    expect(hovered!.hoveredDistrictIndex).toBeGreaterThanOrEqual(0);
+    expect(hovered!.inspectedQuarterKey).toBe('library');
+    expect(hovered!.hoveredQuarterIndex).toBeGreaterThanOrEqual(0);
 
     // Move the pointer OUT of the ring. The sticky-hover model
-    // intentionally KEEPS `inspectedDistrictKey` pointing at library —
+    // intentionally KEEPS `inspectedQuarterKey` pointing at library —
     // that's the whole point. The hover index should clear back to -1.
     await page.mouse.move(off.x + 5, off.y + 5);
     await page.waitForTimeout(150);
     const released = await getKingdomState(page);
-    expect(released!.hoveredDistrictIndex).toBe(-1);
-    expect(released!.inspectedDistrictKey).toBe('library');
+    expect(released!.hoveredQuarterIndex).toBe(-1);
+    expect(released!.inspectedQuarterKey).toBe('library');
 
     // Verify it was written to localStorage under the new key.
     const stored = await page.evaluate(() => {
@@ -318,18 +318,20 @@ test.describe('Kingdom of Agents — Dashboard', () => {
       return raw ? JSON.parse(raw) : null;
     });
     expect(stored).toBeTruthy();
-    expect(stored.inspectedDistrictKey).toBe('library');
+    expect(stored.inspectedQuarterKey).toBe('library');
 
-    // Reload and confirm the scene restores the sticky district.
+    // Reload and confirm the scene restores the sticky quarter.
     await page.reload();
     await waitForGame(page);
     const restored = await getKingdomState(page);
-    expect(restored!.inspectedDistrictKey).toBe('library');
+    expect(restored!.inspectedQuarterKey).toBe('library');
   });
 
-  test('loadKingdomPrefs migrates legacy pinnedDistrictKey to inspectedDistrictKey', async ({ page }) => {
-    // Seed localStorage with the legacy pinned-district pref BEFORE the
+  test('loadKingdomPrefs migrates legacy pinnedDistrictKey to inspectedQuarterKey', async ({ page }) => {
+    // Seed localStorage with the v0.1 legacy field name BEFORE the
     // scene boots so loadKingdomPrefs has a chance to migrate it.
+    // Existing users have this key already; it must continue to be
+    // honored across the district -> quarter rename.
     await page.addInitScript(() => {
       window.localStorage.setItem('koa_prefs', JSON.stringify({
         pinnedDistrictKey: 'court',
@@ -340,16 +342,40 @@ test.describe('Kingdom of Agents — Dashboard', () => {
     await waitForGame(page);
 
     const state = await getKingdomState(page);
-    expect(state!.inspectedDistrictKey).toBe('court');
+    expect(state!.inspectedQuarterKey).toBe('court');
 
-    // The legacy field must be deleted after migration so it doesn't
+    // The legacy fields must be deleted after migration so they don't
     // linger in storage forever.
     const stored = await page.evaluate(() => {
       const raw = window.localStorage.getItem('koa_prefs');
       return raw ? JSON.parse(raw) : null;
     });
     expect(stored.pinnedDistrictKey).toBeUndefined();
-    expect(stored.inspectedDistrictKey).toBe('court');
+    expect(stored.inspectedDistrictKey).toBeUndefined();
+    expect(stored.inspectedQuarterKey).toBe('court');
+  });
+
+  test('loadKingdomPrefs migrates legacy inspectedDistrictKey to inspectedQuarterKey', async ({ page }) => {
+    // Intermediate-generation field (v0.1.x). Some users will have
+    // this set instead of pinnedDistrictKey.
+    await page.addInitScript(() => {
+      window.localStorage.setItem('koa_prefs', JSON.stringify({
+        inspectedDistrictKey: 'library',
+        replayPaused: false,
+      }));
+    });
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    const state = await getKingdomState(page);
+    expect(state!.inspectedQuarterKey).toBe('library');
+
+    const stored = await page.evaluate(() => {
+      const raw = window.localStorage.getItem('koa_prefs');
+      return raw ? JSON.parse(raw) : null;
+    });
+    expect(stored.inspectedDistrictKey).toBeUndefined();
+    expect(stored.inspectedQuarterKey).toBe('library');
   });
 });
 
@@ -473,24 +499,24 @@ for (const vp of VIEWPORTS) {
     expect(state!.screenW).toBe(vp.width);
     expect(state!.screenH).toBe(vp.height);
     expect(state!.sessionCount).toBe(3);
-    expect(state!.districtCount).toBe(8);
+    expect(state!.quarterCount).toBe(8);
 
-    // Layout regression: districts must fit between side panels with at
+    // Layout regression: quarters must fit between side panels with at
     // least a small gutter, and inside the central well between the ops
     // strip and the bottom inspector. This catches the laptop overlap
-    // bug where districts crashed into Selected Session / Activity Feed.
+    // bug where quarters crashed into Selected Session / Activity Feed.
     const layout = state!.layout!;
     expect(layout).not.toBeNull();
     const leftPanelRight = layout.leftX + layout.panelW;
     const rightPanelLeft = layout.rightX;
     const wellTop = layout.opsY + layout.opsH;
     const wellBottom = layout.bottomY;
-    for (const d of state!.districtRects) {
-      const r = layout.districtR;
-      expect(d.x - r, `district ${d.key} left edge crosses left panel`).toBeGreaterThanOrEqual(leftPanelRight);
-      expect(d.x + r, `district ${d.key} right edge crosses right panel`).toBeLessThanOrEqual(rightPanelLeft);
-      expect(d.y - r, `district ${d.key} top edge crosses ops strip`).toBeGreaterThanOrEqual(wellTop);
-      expect(d.y + r, `district ${d.key} bottom edge crosses bottom inspector`).toBeLessThanOrEqual(wellBottom);
+    for (const d of state!.quarterRects) {
+      const r = layout.quarterR;
+      expect(d.x - r, `quarter ${d.key} left edge crosses left panel`).toBeGreaterThanOrEqual(leftPanelRight);
+      expect(d.x + r, `quarter ${d.key} right edge crosses right panel`).toBeLessThanOrEqual(rightPanelLeft);
+      expect(d.y - r, `quarter ${d.key} top edge crosses ops strip`).toBeGreaterThanOrEqual(wellTop);
+      expect(d.y + r, `quarter ${d.key} bottom edge crosses bottom inspector`).toBeLessThanOrEqual(wellBottom);
     }
   });
 }

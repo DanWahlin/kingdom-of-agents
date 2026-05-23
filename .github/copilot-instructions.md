@@ -51,7 +51,7 @@ There is **one** Phaser scene, `CodeKingdomScene`, in `src/game/scenes/CodeKingd
 
 | Change Made | Files to Update |
 |-------------|-----------------|
-| **Scene behavior changed** | Update `tests/code-kingdom.spec.ts`; run all 26 tests |
+| **Scene behavior changed** | Update `tests/code-kingdom.spec.ts`; run all 27 tests |
 | **Top bar HTML/CSS changed** | Update `tests/app.spec.ts` selectors if id/class names change |
 | **Rust command added/removed** | Update `src-tauri/capabilities/main.json` permissions; `cargo check`; verify renderer invocation site |
 | **AgentProvider added** | Add to `default_providers()`; verify allowlist in `scan()`; watcher attaches automatically |

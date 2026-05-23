@@ -68,7 +68,7 @@ pub struct AgentSessionSummary {
     pub task_count: usize,
     /// Tools served by MCP servers (github-mcp-server-*, context7-*,
     /// kit-dev-mcp-*, etc.) — separate bucket because they sit on a
-    /// dedicated district in the renderer.
+    /// dedicated quarter in the renderer.
     #[serde(default)]
     pub mcp_count: usize,
     pub error_count: usize,
@@ -275,7 +275,7 @@ fn merge_scans(scans: Vec<ProviderScan>) -> AgentActivity {
     //   1. Global cap (MAX_TOOLS) keeps the renderer's overall payload
     //      small.
     //   2. Per-category cap (MAX_TOOLS_PER_CATEGORY) guarantees each
-    //      district inspector gets at least its top-N tools — without
+    //      quarter inspector gets at least its top-N tools — without
     //      this, chatty categories (bash, view) crowd out the long-tail
     //      categories (MCP, web, agents) entirely so their inspector
     //      panel shows "no tools" even when calls were observed.
@@ -308,7 +308,7 @@ fn merge_scans(scans: Vec<ProviderScan>) -> AgentActivity {
     }
     // Enforce the global cap but never shrink below the per-category
     // guarantees. Derived from the number of distinct categories seen
-    // in this scan so adding a new district later doesn't silently
+    // in this scan so adding a new quarter later doesn't silently
     // truncate its top-N entries. Worst case: every category has
     // MAX_TOOLS_PER_CATEGORY entries → ceiling = categories * 5.
     let category_floor = per_category.len() * MAX_TOOLS_PER_CATEGORY;
@@ -1012,7 +1012,7 @@ fn classify_tool(
 }
 
 /// Load all MCP-registered tool names from `~/.copilot/m-mcp-servers.json`
-/// so `categorize_tool` can route them to the MCP district even when
+/// so `categorize_tool` can route them to the MCP quarter even when
 /// they have underscore-only names (e.g. Playwright MCP registers
 /// `browser_close`, `browser_navigate`, etc. which the heuristic-only
 /// path silently falls through to "workshop"). Returns an empty set
@@ -1364,7 +1364,7 @@ mod tests {
     /// names (Playwright's `browser_close`, `browser_navigate`,
     /// presentation server's `add_slide_from_code`, etc.) used to fall
     /// through the hyphen/`mcp` heuristic and land in "workshop"
-    /// — invisible in every district. The allowlist must override
+    /// — invisible in every quarter. The allowlist must override
     /// that and route them to "mcp".
     #[test]
     fn mcp_allowlist_routes_underscore_only_tools() {
@@ -1382,7 +1382,7 @@ mod tests {
 
     /// Tools NOT in the allowlist and without hyphen/`mcp` markers
     /// should still hit the original heuristic path (native Copilot
-    /// tools land in their proper districts).
+    /// tools land in their proper quarters).
     #[test]
     fn empty_allowlist_falls_back_to_heuristics() {
         let allowlist = HashSet::new();

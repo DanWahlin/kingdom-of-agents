@@ -74,7 +74,7 @@ interface CopilotActivity {
   generated_at_ms: number;
 }
 
-interface District {
+interface Quarter {
   key: KingdomCategory;
   label: string;
   short: string;
@@ -106,14 +106,14 @@ interface KingdomLayout {
   centerY: number;
   radiusX: number;
   radiusY: number;
-  districtR: number;
-  districtSize: number;
+  quarterR: number;
+  quarterSize: number;
   topLift: number;
 }
 
 interface EventPulse {
   id: string;
-  districtKey: KingdomCategory;
+  quarterKey: KingdomCategory;
   color: number;
   startX: number;
   startY: number;
@@ -231,7 +231,7 @@ function loadInitialThemeMode(): ThemeMode {
 }
 
 setActiveTheme(loadInitialThemeMode());
-const DISTRICT_TEXTURES: Record<string, string> = {
+const QUARTER_TEXTURES: Record<string, string> = {
   forge: 'ts-house-red',
   library: 'ts-tower-blue',
   terminal: 'ts-tower-purple',
@@ -242,12 +242,12 @@ const DISTRICT_TEXTURES: Record<string, string> = {
   mcp: 'ts-house-blue',
 };
 
-/// Single source of truth for district hues. Both `buildDistricts` and
+/// Single source of truth for quarter hues. Both `buildQuarters` and
 /// `categoryColor` read from this map — previously they each had their
 /// own hex literals which silently drifted apart whenever one was
 /// tweaked. The 'alert' entry is shared with the attention/error pulse
-/// path and is intentionally not a district.
-const DISTRICT_COLORS: Record<KingdomCategory, number> = {
+/// path and is intentionally not a quarter.
+const QUARTER_COLORS: Record<KingdomCategory, number> = {
   forge: 0xff8a3d,
   library: 0x61d6ff,
   terminal: 0xa5ff6b,
@@ -258,7 +258,7 @@ const DISTRICT_COLORS: Record<KingdomCategory, number> = {
   mcp: 0x4ad6a8,
   alert: 0xff5252,
   // The remaining KingdomCategory members are event-kind tags, not
-  // visual districts, so they fall back to the muted default in
+  // visual quarters, so they fall back to the muted default in
   // `categoryColor`. Listing them keeps the Record exhaustive.
   workshop: 0x9aa6c8,
   complete: 0x9aa6c8,
@@ -270,15 +270,15 @@ const DISTRICT_COLORS: Record<KingdomCategory, number> = {
 };
 
 /// Vertical offset (px at 1× scale) applied to the four diagonal
-/// districts so they don't visually crowd the side cardinals (Commands,
-/// Intent). Scaled down with the layout in `buildDistricts`.
-const DIAGONAL_DISTRICT_SHIFT_PX = 22;
+/// quarters so they don't visually crowd the side cardinals (Commands,
+/// Intent). Scaled down with the layout in `buildQuarters`.
+const DIAGONAL_QUARTER_SHIFT_PX = 22;
 
-/// Minimum hit radius (px) used by `updateHoveredDistrict`. Acts as a
-/// floor under `layout.districtR` so the smallest compact viewport
+/// Minimum hit radius (px) used by `updateHoveredQuarter`. Acts as a
+/// floor under `layout.quarterR` so the smallest compact viewport
 /// still has a forgiving hover area instead of requiring pixel-perfect
-/// targeting on tiny district icons.
-const DISTRICT_HOVER_RADIUS_MIN_PX = 48;
+/// targeting on tiny quarter icons.
+const QUARTER_HOVER_RADIUS_MIN_PX = 48;
 
 /// Stagger between sequential event pulses fired by `ingestActivityEvents`.
 /// Keeps a burst of N events from looking like a single blob — each one
@@ -327,18 +327,18 @@ export class CodeKingdomScene extends Phaser.Scene {
   private transcriptTextObjects: any[] = [];
   /// Focus mode: when true, the Summary + Selected Session + Activity
   /// Feed side panels are skipped and computeLayout() collapses their
-  /// widths to 0 so the kingdom ring (castle + districts) expands to
-  /// fill the full canvas width. The bottom district inspector and
+  /// widths to 0 so the kingdom ring (castle + quarters) expands to
+  /// fill the full canvas width. The bottom quarter inspector and
   /// replay timeline still render so hover/click + scrubber controls
   /// keep working. Toggled from the topbar button via the global
   /// `__koaSetPanelsHidden` hook; persisted in localStorage.
   private panelsHidden = false;
-  private hoveredDistrictIndex = -1;
+  private hoveredQuarterIndex = -1;
   // Sticky last-hover: persists when the pointer leaves the ring so the
-  // district inspector keeps showing the last thing the user pointed at,
-  // instead of snapping back to a previously clicked "pinned" district.
+  // quarter inspector keeps showing the last thing the user pointed at,
+  // instead of snapping back to a previously clicked "pinned" quarter.
   // Click does NOT modify this — hover is the only writer.
-  private inspectedDistrictKey: string | null = null;
+  private inspectedQuarterKey: string | null = null;
   private pollEvent?: any;
   private startupRetryEvents: any[] = [];
   private loading = false;
@@ -376,7 +376,7 @@ export class CodeKingdomScene extends Phaser.Scene {
   /// to the trailing 10-minute window during render.
   private toolRateSamples: number[] = [];
   /// Sliding tool-call timestamps split by category for work-mix
-  /// sparklines AND the 24h district counts. Each entry stores the
+  /// sparklines AND the 24h quarter counts. Each entry stores the
   /// event identity key alongside its perfTs so compute24hCategoryCounts
   /// can dedupe live entries against the per-session snapshot —
   /// otherwise live counts that overlap with the snapshot would either
@@ -412,15 +412,15 @@ export class CodeKingdomScene extends Phaser.Scene {
   public selectedSessionIndex = 0;
 
   public activity: CopilotActivity = createEmptyActivity();
-  public districts: District[] = [];
+  public quarters: Quarter[] = [];
   public layout: KingdomLayout | null = null;
   public insightCards: InsightCard[] = [];
   public opsSummary: OpsSummary = createOpsSummary('Disconnected', 'watch', 'Run GitHub Copilot CLI to populate activity.', 'No activity loaded yet.');
   public selectedSession: CopilotSessionSummary | null = null;
   public sessionPickerRows: { id: string; x: number; y: number; w: number; h: number }[] = [];
   public activeEventPulseCount = 0;
-  public districtEventBadges: Record<string, number> = {};
-  public hoveredDistrictKey: string | null = null;
+  public quarterEventBadges: Record<string, number> = {};
+  public hoveredQuarterKey: string | null = null;
   /// `renderActivity()` destroys ~50 Phaser Text objects and recreates
   /// them — each Text uploads a fresh canvas2d → WebGL texture, so
   /// one rebuild can cost 30-100ms. If that spike lands while comet
@@ -473,7 +473,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     // Animated moat ring that pulses when sessions are active. Lives
     // on its own graphics layer so update() can repaint it 60fps
     // without rebuilding the whole scene. Depth 2 keeps it above the
-    // map background but below district sprites (depth 5+).
+    // map background but below quarter sprites (depth 5+).
     this.moat = this.add.graphics().setDepth(2);
     // ADD blend on the flow layer is set ONCE here (not toggled per
     // frame in updateEventPulses) because nothing else draws to this
@@ -481,18 +481,15 @@ export class CodeKingdomScene extends Phaser.Scene {
     // should blend additively for the mystical glow.
     this.flow = this.add.graphics().setDepth(8).setBlendMode(Phaser.BlendModes.ADD);
     this.ui = this.add.graphics().setDepth(10);
-    // Modal overlays (transcript drill-down) sit above district labels
+    // Modal overlays (transcript drill-down) sit above quarter labels
     // and badges (depth 20-21) so they fully occlude what's behind them.
     this.overlay = this.add.graphics().setDepth(50);
 
     // Restore last-session prefs so context survives a window restart.
+    // The migration in loadKingdomPrefs() folds older `pinnedDistrictKey`
+    // and `inspectedDistrictKey` storage entries into the new key.
     const prefs = loadKingdomPrefs();
-    // Backward compat: older builds stored the pin under `pinnedDistrictKey`.
-    // Treat that as the initial sticky-hover position so users don't lose
-    // their last view when upgrading.
-    this.inspectedDistrictKey = prefs.inspectedDistrictKey
-      ?? prefs.pinnedDistrictKey
-      ?? null;
+    this.inspectedQuarterKey = prefs.inspectedQuarterKey ?? null;
     if (prefs.replayPaused) this.replayPaused = true;
     if (prefs.transcriptOpen) this.transcriptOpen = true;
     if (typeof prefs.lastSelectedSessionId === 'string') {
@@ -537,7 +534,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       this.renderActivity();
     };
     // Focus-mode toggle. Hides side panels and re-lays-out the ring so
-    // the castle + districts expand to fill the canvas. Idempotent —
+    // the castle + quarters expand to fill the canvas. Idempotent —
     // hud.js may call this multiple times during its mount poll. The
     // initial value is restored from localStorage above (before the
     // first render) so we early-return when hud.js's first call agrees
@@ -548,7 +545,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       if (next === this.panelsHidden) return;
       this.panelsHidden = next;
       this.layout = this.computeLayout();
-      this.districts = this.buildDistricts();
+      this.quarters = this.buildQuarters();
       this.renderActivity();
     };
     // Startup retry ramp: the very first invoke can race the Tauri bridge
@@ -592,7 +589,7 @@ export class CodeKingdomScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number) {
-    this.updateHoveredDistrict();
+    this.updateHoveredQuarter();
     this.advanceDemoActivity(delta);
     this.advanceReplay(delta);
     this.updateEventPulses(delta);
@@ -673,7 +670,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       if (!over && this.replayTrackRect && this.eventLog.length > 0 && this.hitRect(px, py, this.replayTrackRect)) over = true;
       if (!over && this.hitRect(px, py, this.openInEditorRect)) over = true;
       if (!over && this.hitRect(px, py, this.transcriptToggleRect)) over = true;
-      if (!over && this.hoveredDistrictIndex >= 0) over = true;
+      if (!over && this.hoveredQuarterIndex >= 0) over = true;
     }
     const desired = over ? 'pointer' : 'default';
     if (canvas.style.cursor !== desired) canvas.style.cursor = desired;
@@ -792,9 +789,9 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.overlay.clear();
 
     this.layout = this.computeLayout();
-    this.districts = this.buildDistricts();
-    this.hoveredDistrictKey = this.hoveredDistrictIndex >= 0
-      ? this.districts[this.hoveredDistrictIndex]?.key ?? null
+    this.quarters = this.buildQuarters();
+    this.hoveredQuarterKey = this.hoveredQuarterIndex >= 0
+      ? this.quarters[this.hoveredQuarterIndex]?.key ?? null
       : null;
     this.opsSummary = buildOpsSummary(this.activity);
     // Surface the ops summary in the HTML top bar (hud.js owns the
@@ -808,14 +805,14 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.pushSelectedModelToNavbar();
 
     this.drawBackground();
-    this.drawDistricts();
+    this.drawQuarters();
     this.drawPanels();
   }
 
   // Single source of truth for the dashboard layout. Computes panel
-  // rects first, then derives the ring radii so districts never
+  // rects first, then derives the ring radii so quarters never
   // collide with the side panels or the bottom inspector. This must
-  // run before buildDistricts so sceneScale and rect math agree.
+  // run before buildQuarters so sceneScale and rect math agree.
   private computeLayout(): KingdomLayout {
     const s = sceneScale();
     const compact = W < 1600 || H < 900;
@@ -848,7 +845,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     // strip and details stop overlapping at 1024×768 and 1280×800.
     const sessionH = Math.min(compact ? 320 : 360, Math.max(294, H * 0.32));
 
-    // Replay strip is hidden in focus mode so the district inspector
+    // Replay strip is hidden in focus mode so the quarter inspector
     // can drop to the bottom edge and the kingdom ring picks up the
     // recovered vertical room. replayY is parked off-canvas so any
     // stale rect references read as out-of-bounds (the strip is also
@@ -894,9 +891,9 @@ export class CodeKingdomScene extends Phaser.Scene {
 
     const centerX = wellLeft + wellW / 2;
 
-    // District sprite half-size. For 8 evenly spaced points on an
-    // ellipse, the worst-case chord between adjacent districts is
-    // ~0.77 * min(rx, ry). District sprite must be smaller than that
+    // Quarter sprite half-size. For 8 evenly spaced points on an
+    // ellipse, the worst-case chord between adjacent quarters is
+    // ~0.77 * min(rx, ry). Quarter sprite must be smaller than that
     // chord to avoid neighbour collisions, so derive sprite size from
     // the smaller radius rather than from pure scene scale. In focus
     // mode we lift the absolute cap so the buildings can grow into
@@ -907,19 +904,19 @@ export class CodeKingdomScene extends Phaser.Scene {
     const rawRadiusX = wellW / 2;
     const rawRadiusY = wellH / 2;
     const minRingRadius = Math.min(rawRadiusX, rawRadiusY);
-    const districtCap = this.panelsHidden ? 80 : 64;
-    const districtR = Math.max(36, Math.min(districtCap * s, minRingRadius * 0.42));
-    const districtSize = districtR * 2;
+    const quarterCap = this.panelsHidden ? 80 : 64;
+    const quarterR = Math.max(36, Math.min(quarterCap * s, minRingRadius * 0.42));
+    const quarterSize = quarterR * 2;
 
-    // Label + count text block below each district sprite occupies
+    // Label + count text block below each quarter sprite occupies
     // ~46*pedestalUnit (halo bottom) + 14 + labelSize + countSize px
-    // (see drawDistricts). Using the same pedestalUnit (districtR/64)
+    // (see drawQuarters). Using the same pedestalUnit (quarterR/64)
     // here as the halo math there means labels follow when focus-mode
     // grows the sprites.
-    const labelStackH = Math.round(46 * (districtR / 64) + 14 + Math.max(14, districtR * 0.22) + Math.max(18, districtR * 0.26));
+    const labelStackH = Math.round(46 * (quarterR / 64) + 14 + Math.max(14, quarterR * 0.22) + Math.max(18, quarterR * 0.26));
 
-    // The top district (Edits) only needs `districtR` of clearance
-    // above its center, while the bottom district (Agents) needs
+    // The top quarter (Edits) only needs `quarterR` of clearance
+    // above its center, while the bottom quarter (Agents) needs
     // `labelStackH` for its label stack. That asymmetry wastes vertical
     // space when we use the smaller of the two for radiusY. Instead,
     // shift the ring's geometric center UP by half the asymmetry so
@@ -927,23 +924,23 @@ export class CodeKingdomScene extends Phaser.Scene {
     // then grow to use the freed space. Focus mode only; panels-visible
     // layout has been signed off and we don't disturb it.
     const verticalShift = this.panelsHidden
-      ? Math.max(0, (labelStackH - districtR) / 2)
+      ? Math.max(0, (labelStackH - quarterR) / 2)
       : 0;
     const centerY = wellTop + wellH / 2 - verticalShift;
 
     const radiusY = this.panelsHidden
-      ? Math.max(100, rawRadiusY - (labelStackH + districtR) / 2)
-      : Math.max(100, rawRadiusY - Math.max(districtR, labelStackH));
+      ? Math.max(100, rawRadiusY - (labelStackH + quarterR) / 2)
+      : Math.max(100, rawRadiusY - Math.max(quarterR, labelStackH));
 
     // In focus mode the well is much wider than tall (no side panels),
-    // so an unconstrained radiusX puts the side districts far from the
+    // so an unconstrained radiusX puts the side quarters far from the
     // castle and breaks the ring feel. Cap radiusX so the ellipse stays
     // closer to a circle. 1.4:1 is the sweet spot — tighter (1.3)
     // crowds the castle halo on smaller viewports, looser (1.5+) starts
     // to look elongated on wide ones.
     const radiusXCap = this.panelsHidden ? radiusY * 1.4 : Infinity;
-    const radiusX = Math.max(120, Math.min(rawRadiusX - districtR, radiusXCap));
-    const topLift = Math.min(districtR * 0.6, Math.max(0, wellTop - opsY - opsH - districtR * 1.4));
+    const radiusX = Math.max(120, Math.min(rawRadiusX - quarterR, radiusXCap));
+    const topLift = Math.min(quarterR * 0.6, Math.max(0, wellTop - opsY - opsH - quarterR * 1.4));
 
     return {
       s, compact,
@@ -954,12 +951,12 @@ export class CodeKingdomScene extends Phaser.Scene {
       bottomH, bottomY,
       inspectorX, inspectorW,
       centerX, centerY,
-      radiusX, radiusY, districtR, districtSize, topLift,
+      radiusX, radiusY, quarterR, quarterSize, topLift,
     };
   }
 
-  private buildDistricts(): District[] {
-    // District badges show *recent* activity (last 24h) rather than
+  private buildQuarters(): Quarter[] {
+    // Quarter badges show *recent* activity (last 24h) rather than
     // lifetime totals so an idle building actually looks idle. Failed
     // terminal calls are excluded — those aren't actionable for the dev
     // and shouldn't inflate the Commands count.
@@ -967,7 +964,7 @@ export class CodeKingdomScene extends Phaser.Scene {
 
     const layout = this.layout ?? this.computeLayout();
     const { centerX, centerY, radiusX, radiusY, topLift, s } = layout;
-    const specs: Omit<District, 'x' | 'y' | 'count' | 'color'>[] = [
+    const specs: Omit<Quarter, 'x' | 'y' | 'count' | 'color'>[] = [
       { key: 'forge', label: 'Forge', short: 'Edits' },
       { key: 'library', label: 'Library', short: 'Reads' },
       { key: 'terminal', label: 'Terminal Keep', short: 'Commands' },
@@ -983,10 +980,10 @@ export class CodeKingdomScene extends Phaser.Scene {
     // We then nudge ONLY the four diagonals vertically: upper diagonals
     // (Reads, MCP) shift up, lower diagonals (Web/Docs, Skills) shift
     // down. This opens a visible vertical gap between the diagonals and
-    // the side districts (Commands, Intent) at sin=0 so their labels
+    // the side quarters (Commands, Intent) at sin=0 so their labels
     // and brackets don't visually crowd each other. Cardinal positions
     // (top/bottom/sides) stay on the geometric circle.
-    const diagonalShift = Math.round(DIAGONAL_DISTRICT_SHIFT_PX * Math.max(s, 0.85));
+    const diagonalShift = Math.round(DIAGONAL_QUARTER_SHIFT_PX * Math.max(s, 0.85));
 
     return specs.map((spec, index) => {
       const angle = -Math.PI / 2 + (Math.PI * 2 * index) / specs.length;
@@ -996,7 +993,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       const diagY = isDiagonal ? Math.sign(sinA) * diagonalShift : 0;
       return {
         ...spec,
-        color: DISTRICT_COLORS[spec.key as KingdomCategory] ?? 0x9aa6c8,
+        color: QUARTER_COLORS[spec.key as KingdomCategory] ?? 0x9aa6c8,
         x: centerX + Math.cos(angle) * radiusX,
         y: centerY + sinA * radiusY - lift + diagY,
         count: counts.get(spec.key) ?? 0,
@@ -1004,7 +1001,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     });
   }
 
-  /// Recent activity per district (last 24h). Merges two sources to
+  /// Recent activity per quarter (last 24h). Merges two sources to
   /// match what the Activity Feed actually shows:
   ///   1. Per-session `recent_tool_calls` snapshot — catches history
   ///      that existed before the app was running (with category info).
@@ -1131,51 +1128,51 @@ export class CodeKingdomScene extends Phaser.Scene {
     }
   }
 
-  private drawDistricts() {
+  private drawQuarters() {
     const layout = this.layout!;
-    const { centerX, centerY, s, districtSize, districtR, topLift } = layout;
+    const { centerX, centerY, s, quarterSize, quarterR, topLift } = layout;
     // Castle Y is biased slightly below centerY so the castle visually
-    // sits inside the ring of buildings. Each district card also has a
+    // sits inside the ring of buildings. Each quarter card also has a
     // ~38px label block below its sprite that pushes the *visible*
     // bottom of the layout further down than the geometric ring, and
     // Edits is lifted upward by `topLift` which pulls the geometric
     // centroid above centerY. Both effects bias the eye downward; we
     // counter by sliding the castle down by half the topLift plus a
-    // small fraction of the district size.
-    const castleY = centerY + topLift * 0.5 + districtSize * 0.12;
+    // small fraction of the quarter size.
+    const castleY = centerY + topLift * 0.5 + quarterSize * 0.12;
     this.drawCastle(centerX, castleY, s);
 
-    // Find which district the inspector is currently showing so the
+    // Find which quarter the inspector is currently showing so the
     // thick "focused" bracket can track it. Live hover always wins;
     // otherwise the sticky-last-hover key picks the survivor; if neither
     // is set (first paint) nothing gets the focused styling.
-    const inspectedIdx = this.hoveredDistrictIndex >= 0
-      ? this.hoveredDistrictIndex
-      : (this.inspectedDistrictKey
-          ? this.districts.findIndex(d => d.key === this.inspectedDistrictKey)
+    const inspectedIdx = this.hoveredQuarterIndex >= 0
+      ? this.hoveredQuarterIndex
+      : (this.inspectedQuarterKey
+          ? this.quarters.findIndex(d => d.key === this.inspectedQuarterKey)
           : -1);
 
-    for (let i = 0; i < this.districts.length; i++) {
-      const district = this.districts[i];
+    for (let i = 0; i < this.quarters.length; i++) {
+      const quarter = this.quarters[i];
       const focused = i === inspectedIdx;
-      const size = districtSize;
-      const panelTop = district.y - size / 2;
+      const size = quarterSize;
+      const panelTop = quarter.y - size / 2;
       // Extend the corner frame downward so the label + count sit cleanly
       // inside the brackets, below the colored halo (outer radius 54*s,
-      // centered at district.y - 8s → bottom at district.y + 46s).
+      // centered at quarter.y - 8s → bottom at quarter.y + 46s).
       const labelBlockH = Math.round(38 * Math.max(s, 0.85));
       const frameH = size + labelBlockH;
       const light = theme.mode === 'light';
       const liveOuter = light ? (focused ? 0.55 : 0.34) : (focused ? 0.7 : 0.5);
       const liveInner = light ? (focused ? 0.78 : 0.55) : (focused ? 0.92 : 0.75);
-      // Every district renders with the same colored pedestal regardless
-      // of 24h activity count. We used to dim idle districts to a grey
+      // Every quarter renders with the same colored pedestal regardless
+      // of 24h activity count. We used to dim idle quarters to a grey
       // wash, but that read as a visual "bug" against the surrounding
-      // active districts — the activity badge in the corner already
+      // active quarters — the activity badge in the corner already
       // signals zero activity, so the desaturation was redundant noise.
       const outerAlpha = liveOuter;
       const innerAlpha = liveInner;
-      const pedestalColor = district.color;
+      const pedestalColor = quarter.color;
       // Draw the panel/backdrop FIRST so the colored pedestal circles
       // can layer on top of it in dark mode. (Previously the outer
       // circle was drawn first and then the near-opaque dark panel
@@ -1183,20 +1180,20 @@ export class CodeKingdomScene extends Phaser.Scene {
       // visible in light mode disappeared in dark mode.) Light mode
       // skips the panel fill entirely, so the circles still read
       // directly against the kingdom backdrop.
-      this.drawPixelPanel(district.x - size / 2, panelTop, size, frameH, district.color, focused, s);
-      // Halo circles scale with districtR (via pedestalUnit) instead of
+      this.drawPixelPanel(quarter.x - size / 2, panelTop, size, frameH, quarter.color, focused, s);
+      // Halo circles scale with quarterR (via pedestalUnit) instead of
       // raw scene scale so they keep their visual proportion when
-      // focus-mode bumps the district sprite size. labelStackH in
+      // focus-mode bumps the quarter sprite size. labelStackH in
       // computeLayout uses the same unit so labels follow.
-      const pedestalUnit = districtR / 64;
+      const pedestalUnit = quarterR / 64;
       this.map.fillStyle(pedestalColor, outerAlpha);
-      this.map.fillCircle(district.x, district.y - 8 * pedestalUnit, 54 * pedestalUnit);
+      this.map.fillCircle(quarter.x, quarter.y - 8 * pedestalUnit, 54 * pedestalUnit);
       this.map.fillStyle(pedestalColor, innerAlpha);
-      this.map.fillCircle(district.x, district.y - 18 * pedestalUnit, 30 * pedestalUnit);
-      const texture = DISTRICT_TEXTURES[district.key] ?? 'ts-house-blue';
+      this.map.fillCircle(quarter.x, quarter.y - 18 * pedestalUnit, 30 * pedestalUnit);
+      const texture = QUARTER_TEXTURES[quarter.key] ?? 'ts-house-blue';
       const spriteW = size * 0.52;
       const spriteH = size * 0.74;
-      const sprite = this.add.image(district.x, panelTop + size * 0.36, texture)
+      const sprite = this.add.image(quarter.x, panelTop + size * 0.36, texture)
         .setOrigin(0.5, 0.62)
         .setDepth(7)
         .setAlpha(focused ? 1 : 0.9);
@@ -1205,13 +1202,13 @@ export class CodeKingdomScene extends Phaser.Scene {
       const labelSize = Math.max(10, Math.round(size * 0.1));
       const countSize = Math.max(13, Math.round(size * 0.13));
       // Place the label just below the visible halo (which now scales
-      // with districtR via pedestalUnit) with a small breathing gap so
+      // with quarterR via pedestalUnit) with a small breathing gap so
       // text never overlaps the disc.
-      const labelY = district.y + 46 * pedestalUnit + 8 + labelSize / 2;
+      const labelY = quarter.y + 46 * pedestalUnit + 8 + labelSize / 2;
       const countY = labelY + labelSize / 2 + 6 + countSize / 2;
-      const countColor = colorToCss(districtTextColor(district.color));
-      this.addText(district.x, labelY, district.short, labelSize, theme.text).setOrigin(0.5);
-      this.addText(district.x, countY, String(district.count), countSize, countColor).setOrigin(0.5);
+      const countColor = colorToCss(quarterTextColor(quarter.color));
+      this.addText(quarter.x, labelY, quarter.short, labelSize, theme.text).setOrigin(0.5);
+      this.addText(quarter.x, countY, String(quarter.count), countSize, countColor).setOrigin(0.5);
     }
   }
 
@@ -1223,7 +1220,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     const border = Math.max(2, Math.round((focused ? 4 : 2) * s));
     const notch = Math.max(10, Math.round(13 * s));
     // In light mode we drop the panel fill + drop-shadow entirely so the
-    // building sprite reads on the kingdom backdrop and the district's
+    // building sprite reads on the kingdom backdrop and the quarter's
     // colored corner-frame is the only chrome around it. Dark mode keeps
     // the deep card so the sprites pop against the navy backdrop.
     if (theme.mode !== 'light') {
@@ -1233,7 +1230,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       this.map.fillRect(px + notch, py, pw - notch * 2, ph);
       this.map.fillRect(px, py + notch, pw, ph - notch * 2);
     }
-    // Bracket color: in light mode the raw district hues (light cyan,
+    // Bracket color: in light mode the raw quarter hues (light cyan,
     // soft yellow, lavender) wash out at full saturation on a white
     // backdrop, so they get darkened. In dark mode the hues read fine
     // as-is.
@@ -1250,16 +1247,16 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.map.fillRect(px + pw - notch, py + ph - notch, notch - border, border);
   }
 
-  private drawDistrictActivityBadge(
-    district: District,
+  private drawQuarterActivityBadge(
+    quarter: Quarter,
     panelTop: number,
     size: number,
     s: number,
   ) {
-    const stats = this.getDistrictSessionStats(district.key);
+    const stats = this.getQuarterSessionStats(quarter.key);
     if (stats.total === 0) return;
     const badgeColor = stats.review > 0 ? 0xff5252 : stats.active > 0 ? 0x60ff9a : 0x8c9ac8;
-    const badgeX = district.x + size / 2 - 18 * s;
+    const badgeX = quarter.x + size / 2 - 18 * s;
     const badgeY = panelTop + 18 * s;
     const badgeSize = 26 * s;
     const border = Math.max(2, Math.round(2 * s));
@@ -1278,25 +1275,25 @@ export class CodeKingdomScene extends Phaser.Scene {
     const active = this.activity.active_sessions;
     const layout = this.layout;
     // Castle scales with the available ring size so it doesn't dwarf
-    // shrunken districts on small screens, AND is hard-capped well
+    // shrunken quarters on small screens, AND is hard-capped well
     // below native (0.78) so it never visually crowds the surrounding
-    // moat / districts on wider windows. 1.0 looked too dominant at
+    // moat / quarters on wider windows. 1.0 looked too dominant at
     // ≥1600 widths; 0.78 keeps the same proportional feel as the
     // older 1280×800 default. We also cap by the free space inside
-    // the ring (`moatR + districtR + gap <= min(radiusX, radiusY)`)
-    // so the moat never touches a cardinal district on small screens.
-    const districtRingGap = 28;
+    // the ring (`moatR + quarterR + gap <= min(radiusX, radiusY)`)
+    // so the moat never touches a cardinal quarter on small screens.
+    const quarterRingGap = 28;
     const ringHalf = layout ? Math.min(layout.radiusX, layout.radiusY) : 0;
     const moatHeadroom = layout
-      ? Math.max(60, ringHalf - layout.districtR - districtRingGap) / 132
+      ? Math.max(60, ringHalf - layout.quarterR - quarterRingGap) / 132
       : Infinity;
     // Focus mode lifts the absolute cap so the castle can grow into
     // the larger ring without being dwarfed by the now-bigger
-    // district buildings. moatHeadroom still keeps it from touching
-    // the surrounding districts.
+    // quarter buildings. moatHeadroom still keeps it from touching
+    // the surrounding quarters.
     const castleCap = this.panelsHidden ? 1.1 : 0.78;
     const castleScale = layout
-      ? Math.min(s, (layout.districtSize / 132) * 1.05, moatHeadroom, castleCap)
+      ? Math.min(s, (layout.quarterSize / 132) * 1.05, moatHeadroom, castleCap)
       : Math.min(s, castleCap);
 
     // (x, y) is the layout center. Castle artwork sits with its visual
@@ -1364,7 +1361,7 @@ export class CodeKingdomScene extends Phaser.Scene {
 
     // Focus mode skips the three side panels (Summary / Selected
     // Session / Activity Feed) so the kingdom ring expands to fill
-    // the canvas. The bottom district inspector + replay timeline at
+    // the canvas. The bottom quarter inspector + replay timeline at
     // the end of this method still draw so hover/click + scrubber
     // controls keep working.
     if (!this.panelsHidden) {
@@ -1451,7 +1448,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     }
     } // end if (!this.panelsHidden)
 
-    this.drawDistrictInspector(inspectorX, bottomY, inspectorW, bottomH);
+    this.drawQuarterInspector(inspectorX, bottomY, inspectorW, bottomH);
 
     // Replay strip is hidden in focus mode — drawReplayTimeline also
     // populates the play/live/track rects that the click handler
@@ -1776,18 +1773,18 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.addText(x + w / 2, y + h / 2, label, 12, fg).setOrigin(0.5, 0.5);
   }
 
-  private drawDistrictInspector(x: number, y: number, w: number, h: number) {
-    const district = this.activeInspectedDistrict();
-    if (!district) return;
+  private drawQuarterInspector(x: number, y: number, w: number, h: number) {
+    const quarter = this.activeInspectedQuarter();
+    if (!quarter) return;
 
-    const stats = this.computeDistrictStats(district.key);
-    const title = district.short;
+    const stats = this.computeQuarterStats(quarter.key);
+    const title = quarter.short;
 
     this.drawPanel(x, y, w, h, title);
     const compact = h < 130;
-    const countLine = `${district.count} recent ${district.short.toLowerCase()} signals`;
+    const countLine = `${quarter.count} recent ${quarter.short.toLowerCase()} signals`;
     // Always render the count line in the main text color. The lighter
-    // district colors (yellow, cyan, purple) are illegible on the white
+    // quarter colors (yellow, cyan, purple) are illegible on the white
     // light-mode card; black/text-color reads cleanly in both themes.
     if (compact) {
       this.addText(x + 24, y + 50, countLine, 13, theme.text).setOrigin(0, 0);
@@ -1807,11 +1804,11 @@ export class CodeKingdomScene extends Phaser.Scene {
     // routed session counts. When no sessions are routed, leave it empty.
     // Commands deliberately skips the "failed" surface — failed bash
     // calls aren't dev-actionable so they don't warrant a red footer.
-    const districtSessions = this.activity.sessions.filter(s => this.pickDistrictForSession(s).key === district.key);
-    const isReviewable = district.key === 'terminal'
+    const quarterSessions = this.activity.sessions.filter(s => this.pickQuarterForSession(s).key === quarter.key);
+    const isReviewable = quarter.key === 'terminal'
       ? (s: CopilotSessionSummary) => s.status === 'needs-attention'
       : errorOrReview;
-    const flagged = districtSessions.filter(isReviewable);
+    const flagged = quarterSessions.filter(isReviewable);
     const footerY = y + h - (compact ? 20 : 24);
     if (flagged.length > 0) {
       const first = flagged[0];
@@ -1820,32 +1817,32 @@ export class CodeKingdomScene extends Phaser.Scene {
       const tool = first.last_tool || 'tool';
       const ago = formatAge(first.stale_seconds);
       this.addText(x + 24, footerY, `! ${name} — ${tool} failed ${ago} ago${more}`, 11, '#ff8a8a').setOrigin(0, 0);
-    } else if (districtSessions.length > 0) {
-      const active = districtSessions.filter(s => s.is_active).length;
-      const sLabel = districtSessions.length === 1 ? 'session' : 'sessions';
-      this.addText(x + 24, footerY, `${districtSessions.length} ${sLabel} routed here · ${active} active`, 11, '#7f97ef').setOrigin(0, 0);
+    } else if (quarterSessions.length > 0) {
+      const active = quarterSessions.filter(s => s.is_active).length;
+      const sLabel = quarterSessions.length === 1 ? 'session' : 'sessions';
+      this.addText(x + 24, footerY, `${quarterSessions.length} ${sLabel} routed here · ${active} active`, 11, '#7f97ef').setOrigin(0, 0);
     }
   }
 
   /// Sticky last-hover model: whatever the user most recently pointed
   /// at stays visible when the pointer moves away. Currently hovered
-  /// district always wins (immediate response); `inspectedDistrictKey`
+  /// quarter always wins (immediate response); `inspectedQuarterKey`
   /// is the persisted last-hover. Before the first hover we fall back
-  /// to the first district so the inspector has something to show.
-  private activeInspectedDistrict(): District | undefined {
-    const hovered = this.districts[this.hoveredDistrictIndex];
+  /// to the first quarter so the inspector has something to show.
+  private activeInspectedQuarter(): Quarter | undefined {
+    const hovered = this.quarters[this.hoveredQuarterIndex];
     if (hovered) return hovered;
-    if (this.inspectedDistrictKey) {
-      const last = this.districts.find(d => d.key === this.inspectedDistrictKey);
+    if (this.inspectedQuarterKey) {
+      const last = this.quarters.find(d => d.key === this.inspectedQuarterKey);
       if (last) return last;
     }
-    return this.districts[0];
+    return this.quarters[0];
   }
 
-  /// Aggregate live stats for the district inspector: top tool, total
+  /// Aggregate live stats for the quarter inspector: top tool, total
   /// calls, average duration (when we have completed entries), and a
   /// short tool list. Replaces the canned advice strings.
-  private computeDistrictStats(key: string): { line: string; toolList: string | null } {
+  private computeQuarterStats(key: string): { line: string; toolList: string | null } {
     const tools = this.activity.tools.filter(t => t.category === key);
     const topTool = tools[0];
     const calls = tools.reduce((sum, t) => sum + t.count, 0);
@@ -1860,7 +1857,7 @@ export class CodeKingdomScene extends Phaser.Scene {
       }
     }
     const avgMs = durCount > 0 ? Math.round(durSum / durCount) : 0;
-    // 24h count matches the district badge — same source so badge and
+    // 24h count matches the quarter badge — same source so badge and
     // inspector tell the same story instead of contradicting each other.
     const last24 = this.compute24hCategoryCounts().get(key) ?? 0;
 
@@ -1884,7 +1881,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     this.transcriptScrollOffset = next;
     // Scroll updates ONLY redraw the transcript overlay (one graphics
     // layer + ~20 text rows) instead of the whole scene (~120 text
-    // objects, full district + panel + castle redraw). The full
+    // objects, full quarter + panel + castle redraw). The full
     // renderActivity path destroyed and recreated every Text on the
     // canvas per wheel tick, which is what made scrolling feel laggy.
     this.renderTranscriptOnly();
@@ -1925,7 +1922,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     const x = (W - w) / 2;
     const y = (H - h) / 2;
     // Paint into the dedicated overlay graphics layer (depth 50) so the
-    // panel fully covers district labels/badges (text depth 20). Text we
+    // panel fully covers quarter labels/badges (text depth 20). Text we
     // add here gets depth 51 inside addTranscriptText for the same reason.
     const g = this.overlay;
     // Dim backdrop so overlay reads as modal.
@@ -1944,7 +1941,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     const closeX = x + w - closeW - 12;
     const closeY = y + 12;
     // Inline close button — drawSmallButton would paint into this.ui
-    // (depth 10), which sits below district labels.
+    // (depth 10), which sits below quarter labels.
     g.fillStyle(0x1a2448, 0.95);
     g.fillRoundedRect(closeX, closeY, closeW, closeH, 6);
     g.lineStyle(1, cssToHex('#ff7a7a'), 0.7);
@@ -2223,35 +2220,35 @@ export class CodeKingdomScene extends Phaser.Scene {
     return obj;
   }
 
-  private updateHoveredDistrict() {
-    if (this.districts.length === 0 || !this.input?.activePointer) return;
+  private updateHoveredQuarter() {
+    if (this.quarters.length === 0 || !this.input?.activePointer) return;
     const pointer = this.input.activePointer;
-    // Hit area tracks the rendered district size (`districtR`) so the
+    // Hit area tracks the rendered quarter size (`quarterR`) so the
     // hover region scales with the viewport. A 48px floor prevents the
     // tiny-window layout from becoming pixel-perfect-only.
-    const hitR = Math.max(DISTRICT_HOVER_RADIUS_MIN_PX, this.layout?.districtR ?? DISTRICT_HOVER_RADIUS_MIN_PX);
+    const hitR = Math.max(QUARTER_HOVER_RADIUS_MIN_PX, this.layout?.quarterR ?? QUARTER_HOVER_RADIUS_MIN_PX);
     let next = -1;
-    for (let i = 0; i < this.districts.length; i++) {
-      const district = this.districts[i];
-      const dx = pointer.x - district.x;
-      const dy = pointer.y - district.y;
+    for (let i = 0; i < this.quarters.length; i++) {
+      const quarter = this.quarters[i];
+      const dx = pointer.x - quarter.x;
+      const dy = pointer.y - quarter.y;
       if (Math.sqrt(dx * dx + dy * dy) <= hitR) {
         next = i;
         break;
       }
     }
-    if (next !== this.hoveredDistrictIndex) {
-      this.hoveredDistrictIndex = next;
-      // Hovering a new district promotes it to the sticky-hover key so
+    if (next !== this.hoveredQuarterIndex) {
+      this.hoveredQuarterIndex = next;
+      // Hovering a new quarter promotes it to the sticky-hover key so
       // the inspector keeps showing it after the pointer leaves the ring.
-      // We only WRITE on transition into a district (next >= 0) — when
+      // We only WRITE on transition into a quarter (next >= 0) — when
       // the pointer leaves the ring entirely (next === -1) the sticky
       // key intentionally stays put so the panel doesn't blank out.
       if (next >= 0) {
-        const d = this.districts[next];
-        if (d && this.inspectedDistrictKey !== d.key) {
-          this.inspectedDistrictKey = d.key;
-          savePref('inspectedDistrictKey', this.inspectedDistrictKey);
+        const d = this.quarters[next];
+        if (d && this.inspectedQuarterKey !== d.key) {
+          this.inspectedQuarterKey = d.key;
+          savePref('inspectedQuarterKey', this.inspectedQuarterKey);
         }
       }
       this.renderActivity();
@@ -2301,7 +2298,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     }
 
     if (wasAtLive && !this.replayPaused && this.bootstrapCompleted) {
-      if (this.districts.length > 0) {
+      if (this.quarters.length > 0) {
         for (let i = 0; i < appended.length; i++) {
           this.queueEventPulse(appended[i], 'live', i * PULSE_STAGGER_MS);
         }
@@ -2444,10 +2441,10 @@ export class CodeKingdomScene extends Phaser.Scene {
     // show up in the Activity Feed but no longer fabricate a building
     // animation that the count can't justify.
     if (event.kind !== 'tool.execution_start') return;
-    const districtKey = districtKeyForEvent(event);
-    if (!districtKey) return;
-    const district = this.districts.find(d => d.key === districtKey);
-    if (!district) return;
+    const quarterKey = quarterKeyForEvent(event);
+    if (!quarterKey) return;
+    const quarter = this.quarters.find(d => d.key === quarterKey);
+    if (!quarter) return;
 
     const s = sceneScale();
     // Real castle center, cached when drawCastle() ran. Falls back to
@@ -2458,24 +2455,24 @@ export class CodeKingdomScene extends Phaser.Scene {
     // Pulse color matches the bracket line color so the dot that flies
     // toward a building reads as the same visual element. In light mode
     // brackets are darkened for contrast, so the pulse follows.
-    const pulseColor = event.success ? districtTextColor(district.color) : 0xff5252;
+    const pulseColor = event.success ? quarterTextColor(quarter.color) : 0xff5252;
     this.eventPulses.push({
       id: `${source}:${eventKey(event)}:${performance.now()}`,
-      districtKey,
+      quarterKey,
       color: pulseColor,
       // Spawn from the castle center so every pulse — including those
-      // bound for diagonal districts (Guild Hall, Tome Hall, Signal
+      // bound for diagonal quarters (Guild Hall, Tome Hall, Signal
       // Tower, MCP) — visibly leaves the castle. Previously startY was
       // offset by ±100px which made pulses to diagonals appear to
       // spawn well above or below the castle, breaking the metaphor.
       startX: castleX,
       startY: castleY,
-      midX: district.x,
-      endX: district.x,
-      // Stop just short of the district sprite center so the arrival
-      // sigil at district.x/y reads as the building "receiving" the
+      midX: quarter.x,
+      endX: quarter.x,
+      // Stop just short of the quarter sprite center so the arrival
+      // sigil at quarter.x/y reads as the building "receiving" the
       // pulse rather than the pulse driving through it.
-      endY: district.y + (district.y < castleY ? -36 * s : 36 * s),
+      endY: quarter.y + (quarter.y < castleY ? -36 * s : 36 * s),
       progress: 0,
       duration: 900,
       delay,
@@ -2556,14 +2553,14 @@ export class CodeKingdomScene extends Phaser.Scene {
       if (pulse.progress >= 1 && !pulse.arrived) {
         pulse.arrived = true;
         if (pulse.source === 'live') {
-          this.incrementDistrictActivity(pulse.districtKey);
+          this.incrementQuarterActivity(pulse.quarterKey);
           // Sigil at the building's actual center (not the pulse's
           // arrival point, which is offset above/below the building).
-          const district = this.districts.find(d => d.key === pulse.districtKey);
-          if (district) {
+          const quarter = this.quarters.find(d => d.key === pulse.quarterKey);
+          if (quarter) {
             this.arrivalEffects.push({
-              x: district.x,
-              y: district.y,
+              x: quarter.x,
+              y: quarter.y,
               color: pulse.color,
               age: 0,
               lifetime: ARRIVAL_LIFETIME_MS,
@@ -2600,14 +2597,14 @@ export class CodeKingdomScene extends Phaser.Scene {
   }
 
   /// Reserved for future per-pulse-arrival hook. Currently a no-op:
-  /// district badge counts are sourced from `compute24hCategoryCounts`
+  /// quarter badge counts are sourced from `compute24hCategoryCounts`
   /// which reads `workMixHistory` — updated in `ingestActivityEvents`
   /// BEFORE the pulse is even queued. The previous implementation
   /// triggered a full `renderActivity()` rebuild on every arrival just
   /// to redraw the same number, which destroyed framerate during
   /// bursts (8+ full scene rebuilds/second). The arrival sigil is now
   /// the sole visual feedback for "pulse landed".
-  private incrementDistrictActivity(_key: KingdomCategory) {
+  private incrementQuarterActivity(_key: KingdomCategory) {
     // intentionally empty — see comment above.
   }
 
@@ -2615,7 +2612,7 @@ export class CodeKingdomScene extends Phaser.Scene {
     if (this.activity.source !== 'demo-fixture') return;
     if (this.replayPaused) return;
     this.demoFlowTimer += delta;
-    if (this.demoFlowTimer < 900 || this.districts.length === 0) return;
+    if (this.demoFlowTimer < 900 || this.quarters.length === 0) return;
     this.demoFlowTimer = 0;
 
     const event = createDemoEvent(this.demoFlowIndex++);
@@ -2626,7 +2623,7 @@ export class CodeKingdomScene extends Phaser.Scene {
 
   private advanceReplay(delta: number) {
     if (this.replayPaused) return;
-    if (this.isAtLive() || this.districts.length === 0) return;
+    if (this.isAtLive() || this.quarters.length === 0) return;
     this.replayPlayTimer += delta;
     while (this.replayPlayTimer >= this.replayPlaybackInterval && !this.isAtLive()) {
       this.replayPlayTimer -= this.replayPlaybackInterval;
@@ -2794,11 +2791,11 @@ export class CodeKingdomScene extends Phaser.Scene {
         return;
       }
     }
-    // Clicking a district is intentionally a no-op now: sticky last-hover
+    // Clicking a quarter is intentionally a no-op now: sticky last-hover
     // already keeps the inspector showing whatever the user pointed at,
     // so the previous "click to pin / click to unpin" model was redundant
     // and prone to surprise jumps when the panel snapped back to a stale
-    // pinned district.
+    // pinned quarter.
   }
 
   private openSelectedSessionInEditor() {
@@ -2818,12 +2815,12 @@ export class CodeKingdomScene extends Phaser.Scene {
     }
   }
 
-  private getDistrictSessionStats(key: KingdomCategory) {
-    const sessions = this.activity.sessions.filter(session => this.pickDistrictForSession(session).key === key);
-    // For the Commands district we deliberately don't count
+  private getQuarterSessionStats(key: KingdomCategory) {
+    const sessions = this.activity.sessions.filter(session => this.pickQuarterForSession(session).key === key);
+    // For the Commands quarter we deliberately don't count
     // error_count toward "needs review" — failed bash commands are
     // typically LLM noise that the dev can't fix, so they shouldn't
-    // turn the Commands badge red. Other districts still escalate on
+    // turn the Commands badge red. Other quarters still escalate on
     // any error.
     const isReviewable = key === 'terminal'
       ? (s: CopilotSessionSummary) => s.status === 'needs-attention'
@@ -2835,8 +2832,8 @@ export class CodeKingdomScene extends Phaser.Scene {
     };
   }
 
-  private pickDistrictForSession(session: CopilotSessionSummary) {
-    const preferred = session.last_event_category && this.districts.some(d => d.key === session.last_event_category)
+  private pickQuarterForSession(session: CopilotSessionSummary) {
+    const preferred = session.last_event_category && this.quarters.some(d => d.key === session.last_event_category)
       ? session.last_event_category
       : session.error_count > 0
       ? 'terminal'
@@ -2849,7 +2846,7 @@ export class CodeKingdomScene extends Phaser.Scene {
             : session.task_count > 0
               ? 'delegates'
               : 'library';
-    return this.districts.find(d => d.key === preferred) ?? this.districts[0];
+    return this.quarters.find(d => d.key === preferred) ?? this.quarters[0];
   }
 
   private clearDynamicObjects() {
@@ -3087,8 +3084,8 @@ function createDemoEvent(index: number, timestampMs = Date.now()): CopilotEventS
 }
 
 function applyDemoEvent(activity: CopilotActivity, event: CopilotEventSummary): CopilotActivity {
-  const districtKey = districtKeyForEvent(event);
-  const toolCategory = districtKey ?? event.category;
+  const quarterKey = quarterKeyForEvent(event);
+  const toolCategory = quarterKey ?? event.category;
   const toolName = event.tool || event.kind;
   const tools = [...activity.tools];
   const tool = tools.find(metric => metric.name === toolName && metric.category === toolCategory);
@@ -3106,12 +3103,12 @@ function applyDemoEvent(activity: CopilotActivity, event: CopilotEventSummary): 
       status: event.success ? (event.category === 'thinking' ? 'thinking' : 'working') : 'needs-attention',
       event_count: session.event_count + 1,
       tool_count: event.kind.startsWith('tool.') ? session.tool_count + 1 : session.tool_count,
-      write_count: districtKey === 'forge' ? session.write_count + 1 : session.write_count,
-      read_count: districtKey === 'library' ? session.read_count + 1 : session.read_count,
-      command_count: districtKey === 'terminal' ? session.command_count + 1 : session.command_count,
-      web_count: districtKey === 'signal' ? session.web_count + 1 : session.web_count,
-      task_count: districtKey === 'delegates' ? session.task_count + 1 : session.task_count,
-      mcp_count: districtKey === 'mcp' ? (session.mcp_count ?? 0) + 1 : (session.mcp_count ?? 0),
+      write_count: quarterKey === 'forge' ? session.write_count + 1 : session.write_count,
+      read_count: quarterKey === 'library' ? session.read_count + 1 : session.read_count,
+      command_count: quarterKey === 'terminal' ? session.command_count + 1 : session.command_count,
+      web_count: quarterKey === 'signal' ? session.web_count + 1 : session.web_count,
+      task_count: quarterKey === 'delegates' ? session.task_count + 1 : session.task_count,
+      mcp_count: quarterKey === 'mcp' ? (session.mcp_count ?? 0) + 1 : (session.mcp_count ?? 0),
       error_count: event.success ? session.error_count : session.error_count + 1,
       output_tokens: session.output_tokens + 120,
       last_tool: event.tool,
@@ -3178,14 +3175,14 @@ function eventKey(event: CopilotEventSummary) {
   return `${event.timestamp}|${event.session_id}|${event.kind}|${event.tool}|${event.category}|${event.success}`;
 }
 
-function districtKeyForEvent(event: CopilotEventSummary): KingdomCategory | null {
+function quarterKeyForEvent(event: CopilotEventSummary): KingdomCategory | null {
   const category = event.category;
   if (category === 'forge' || category === 'library' || category === 'terminal' || category === 'signal' || category === 'delegates' || category === 'skills' || category === 'court' || category === 'mcp') {
     return category;
   }
   if (category === 'alert') return 'terminal';
   // Non-tool events (assistant.turn_start, thinking, waiting, prompt,
-  // arrival, complete, workshop, ...) don't map to any district. They
+  // arrival, complete, workshop, ...) don't map to any quarter. They
   // still appear in the Activity Feed but we no longer fabricate a
   // pulse — that previously created the illusion of work flowing into
   // Intent (the prior fallthrough) without the count ever changing.
@@ -3209,7 +3206,7 @@ function pulsePoint(pulse: EventPulse) {
 }
 
 function categoryColor(category: string) {
-  return DISTRICT_COLORS[category as KingdomCategory] ?? 0x9aa6c8;
+  return QUARTER_COLORS[category as KingdomCategory] ?? 0x9aa6c8;
 }
 
 function colorToCss(color: number) {
@@ -3217,7 +3214,7 @@ function colorToCss(color: number) {
 }
 
 /// Multiply each RGB channel by `factor` (0..1). Used to derive a
-/// darker variant of a district color for the light-mode bracket
+/// darker variant of a quarter color for the light-mode bracket
 /// frames — the raw hues wash out at 0.7 alpha on a white backdrop.
 function darkenColor(color: number, factor: number): number {
   const r = Math.max(0, Math.min(255, Math.floor(((color >> 16) & 0xff) * factor)));
@@ -3229,7 +3226,7 @@ function darkenColor(color: number, factor: number): number {
 /// In light mode the count number sits on white — bright cyan/yellow
 /// don't have enough contrast. Darken those hues for the text color
 /// while leaving dark theme alone.
-function districtTextColor(color: number): number {
+function quarterTextColor(color: number): number {
   return theme.mode === 'light' ? darkenColor(color, 0.55) : color;
 }
 
@@ -3304,12 +3301,9 @@ function feedLabel(event: CopilotEventSummary) {
 const PREFS_KEY = 'koa_prefs';
 
 interface KingdomPrefs {
-  /// Backward compat — old builds stored the click-pinned district key here.
-  /// Read on load as a fallback for `inspectedDistrictKey`.
-  pinnedDistrictKey?: string | null;
-  /// Sticky last-hovered district. Persists across window restarts so
+  /// Sticky last-hovered quarter. Persists across window restarts so
   /// the inspector resumes on whatever the user was last looking at.
-  inspectedDistrictKey?: string | null;
+  inspectedQuarterKey?: string | null;
   replayPaused?: boolean;
   lastSelectedSessionId?: string | null;
   transcriptOpen?: boolean;
@@ -3321,16 +3315,32 @@ function loadKingdomPrefs(): KingdomPrefs {
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object') {
-      const prefs = parsed as KingdomPrefs;
-      // One-time migration: older builds stored the click-pinned
-      // district under `pinnedDistrictKey`. Fold it into the new
-      // `inspectedDistrictKey` (if not already set) and drop the legacy
-      // field so it doesn't linger in storage indefinitely.
-      if (prefs.pinnedDistrictKey !== undefined) {
-        if (prefs.inspectedDistrictKey === undefined || prefs.inspectedDistrictKey === null) {
-          prefs.inspectedDistrictKey = prefs.pinnedDistrictKey;
+      const prefs = parsed as KingdomPrefs & {
+        // Legacy fields that may still be in old users' localStorage:
+        //  - `pinnedDistrictKey`: original click-to-pin key (v0.1).
+        //  - `inspectedDistrictKey`: renamed sticky-hover key (v0.1.x).
+        // Both fold into `inspectedQuarterKey` when present, and we
+        // strip them from storage so they don't linger forever.
+        pinnedDistrictKey?: string | null;
+        inspectedDistrictKey?: string | null;
+      };
+      let mutated = false;
+      if (prefs.inspectedQuarterKey === undefined || prefs.inspectedQuarterKey === null) {
+        if (prefs.inspectedDistrictKey !== undefined && prefs.inspectedDistrictKey !== null) {
+          prefs.inspectedQuarterKey = prefs.inspectedDistrictKey;
+        } else if (prefs.pinnedDistrictKey !== undefined && prefs.pinnedDistrictKey !== null) {
+          prefs.inspectedQuarterKey = prefs.pinnedDistrictKey;
         }
+      }
+      if (prefs.inspectedDistrictKey !== undefined) {
+        delete prefs.inspectedDistrictKey;
+        mutated = true;
+      }
+      if (prefs.pinnedDistrictKey !== undefined) {
         delete prefs.pinnedDistrictKey;
+        mutated = true;
+      }
+      if (mutated) {
         try {
           window.localStorage?.setItem(PREFS_KEY, JSON.stringify(prefs));
         } catch { /* ignore — quota/private-mode is non-fatal */ }
