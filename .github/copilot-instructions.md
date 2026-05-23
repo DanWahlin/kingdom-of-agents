@@ -20,7 +20,7 @@
 
 ## Scene Conventions
 
-There is **one** Phaser scene, `CodeKingdomScene`, in `src/game/scenes/CodeKingdom.ts`. It extends `Phaser.Scene` directly (no `BaseScene` — that abstraction was removed during the extraction from Agent Arcade).
+There is **one** Phaser scene, `CodeKingdomScene`, in `src/game/scenes/CodeKingdom.ts`. It extends `Phaser.Scene` directly (no `BaseScene`).
 
 - `create()` paints its own backdrop at depth `-100`, registers a `scale.resize` handler to repaint it, and listens for `shutdown` once to release timers/listeners/audio/graphics.
 - The scene exposes a small testable surface on `window.__codeKingdom` (`getStatus()`, `saveSnapshot()`, `restartReplay()`, `clearCurrent()`, `clearAll()`, `disconnect()`).
@@ -51,7 +51,7 @@ There is **one** Phaser scene, `CodeKingdomScene`, in `src/game/scenes/CodeKingd
 
 | Change Made | Files to Update |
 |-------------|-----------------|
-| **Scene behavior changed** | Update `tests/code-kingdom.spec.ts`; run all 19 tests |
+| **Scene behavior changed** | Update `tests/code-kingdom.spec.ts`; run all 26 tests |
 | **Top bar HTML/CSS changed** | Update `tests/app.spec.ts` selectors if id/class names change |
 | **Rust command added/removed** | Update `src-tauri/capabilities/main.json` permissions; `cargo check`; verify renderer invocation site |
 | **AgentProvider added** | Add to `default_providers()`; verify allowlist in `scan()`; watcher attaches automatically |

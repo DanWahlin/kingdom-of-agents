@@ -4,7 +4,7 @@
 
 Kingdom of Agents is a windowed, decorated, resizable Tauri 2 desktop app that visualizes live activity from the [GitHub Copilot CLI](https://github.com/github/copilot-cli). It runs as an opaque normal-level window (not an overlay) so devs can park it on a second monitor while interacting with Copilot CLI in their primary terminal.
 
-The product was extracted from the [Agent Arcade](https://github.com/DanWahlin/agent-arcade) monorepo at v0.1.0 and now lives standalone.
+The architecture is **provider-agnostic by design** — the `AgentProvider` trait in `src-tauri/src/agent.rs` is the privacy boundary, and `CopilotProvider` is the only implementation that ships today. Adding Claude Code, Codex, or other CLIs is a matter of dropping in another provider (see "Adding a Provider" below).
 
 ## Repository Structure
 
@@ -15,14 +15,16 @@ src/game/scenes/         — Phaser scenes
   viewport.ts            — W/H exports + refreshDimensions() (resize helper)
 src/game/game.ts         — Single-scene Phaser bootstrap (~55 lines)
 src/game/index.html      — Slim 32 px top bar + #game div
-src/game/hud.js          — Mute toggle (M key) + Phaser master mute
+src/game/hud.js          — Panels toggle + theme toggle + mute (M key)
 src-tauri/               — Tauri 2 Rust backend
   src/lib.rs             — Tauri commands + tray + window-state plugin
   src/agent.rs           — AgentProvider trait + CopilotProvider + fs watcher
   tauri.conf.json        — Windowed, decorated, resizable, opaque, 1280×800
 assets/kingdom/          — Curated CC0 Tiny Swords subset (with LICENSE.txt)
-docs/                    — GitHub Pages site (single-page placeholder)
+docs/                    — GitHub Pages site
+  img/                   — README + landing-page screenshots (regenerable)
 scripts/release.js       — Version bump + git-cliff + tag + push
+scripts/snap-readme.mjs  — Playwright screenshotter for docs/img/
 tests/                   — Playwright (Chromium, headless)
   app.spec.ts            — App shell smoke tests
   code-kingdom.spec.ts   — Scene behavior + multi-viewport layout regressions
@@ -57,7 +59,7 @@ npx playwright test tests/code-kingdom.spec.ts # scene tests only
 npx playwright test --headed                   # visible browser
 ```
 
-The Playwright `webServer` config serves `dist/` over `python3 -m http.server 4173`. The current suite is **19 tests** covering startup, dashboard panels, replay/scrubber, session selection, ops mode classification, and a six-viewport layout regression.
+The Playwright `webServer` config serves `dist/` over `python3 -m http.server 4173`. The current suite is **26 tests** covering startup, dashboard panels, replay/scrubber, session selection, ops mode classification, and a six-viewport layout regression.
 
 ## Key Patterns
 
@@ -65,9 +67,9 @@ The Playwright `webServer` config serves `dist/` over `python3 -m http.server 41
 - **Single scene.** Boot Phaser → instantiate `CodeKingdomScene` → resize listener calls `refreshDimensions()` + `scale.resize(W, H)` so the scene re-lays-out the dashboard on every window change.
 - **Push-driven updates.** The Rust watcher debounces FS events (~300 ms) and calls `win.eval("window.__koaOnAgentActivityChanged && window.__koaOnAgentActivityChanged()")`. The 30 s poll in the scene is a fallback for environments where the watcher fails to attach.
 - **Privacy invariant.** The `AgentProvider::scan()` boundary is the only place where Copilot session data is read. Only allowlisted fields cross into `AgentEventSummary` / `AgentSessionSummary` — never raw prompts, tool args, command output, file paths, or diffs.
-- **`window.__codeKingdom`** exposes `getStatus()` / `saveSnapshot()` / `restartReplay()` / `clearCurrent()` / `clearAll()` / `disconnect()` for the top bar and for tests. The HUD also keeps these accessible because the original scene-aware HUD pattern survived the extraction.
+- **`window.__codeKingdom`** exposes `getStatus()` / `saveSnapshot()` / `restartReplay()` / `clearCurrent()` / `clearAll()` / `disconnect()` for the top bar and for tests.
 - **`window.__phaserGame`** is set so Playwright can reach into the scene registry without DOM scraping.
-- **LocalStorage keys** are prefixed `koa_` (e.g., `koa_muted`, `koa_prefs`).
+- **LocalStorage keys** are prefixed `koa_` (e.g., `koa_muted`, `koa_panels_hidden`, `koa_prefs`).
 
 ## Adding a Provider
 
@@ -79,6 +81,19 @@ The whole point of the `AgentProvider` trait is making this cheap. To add Claude
 4. Add the provider to `default_providers()`.
 
 The watcher automatically attaches to each provider's `state_root()`, the merger handles top-N truncation globally across providers, and the renderer is provider-agnostic.
+
+## Regenerating the README screenshots
+
+`docs/img/dashboard.png` and `docs/img/focus-mode.png` are referenced from the README and the GitHub Pages landing page. Regenerate them after any noticeable UI change:
+
+```bash
+npm run build:frontend
+(cd dist && python3 -m http.server 4173) &
+node scripts/snap-readme.mjs   # writes both PNGs at 1440x900 @ 2x
+kill %1
+```
+
+The script uses a deterministic rich fixture so the dashboard looks active. If you change the fixture, mirror the changes back into the README's "What it does" copy so the screenshot still matches the description.
 
 ## Releasing
 
@@ -94,16 +109,3 @@ npm run release <version>    # e.g. npm run release 0.2.0
 4. The `Build & Release` workflow takes over: builds macOS (universal), Windows, and Linux installers, then attaches them to the GitHub Release.
 
 All three version files must be updated together for installer filenames to be correct — the script does this automatically.
-
-## What was intentionally dropped during extraction
-
-The original Agent Arcade source had ~750 lines of `lib.rs` and an 820-line `BaseScene`. Most of that was supporting things Kingdom of Agents does not need:
-
-- Transparent always-on-top + click-through window (replaced with normal decorated window).
-- Global shortcut registration (no need to keybind from outside the focused window).
-- Five other game scenes + scene switcher + game selector.
-- Score / lives / level / high-score HUD primitives.
-- Pause/resume/help/settings overlays.
-- The Tauri updater plugin and signing key plumbing (v0.1.0 does not auto-update).
-
-If any of these are needed later, port them back deliberately — but keep the trim app shell as the default.

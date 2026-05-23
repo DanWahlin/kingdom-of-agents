@@ -4,7 +4,7 @@ Source archive: /Users/danwahlin/Downloads/Tiny Swords.zip
 Source folder: Tiny Swords (Update 010)
 
 The files in this directory are a curated subset from the free CC0 Tiny Swords
-asset pack provided by the project owner for use in Agent Arcade.
+asset pack provided by the project owner for use in Kingdom of Agents.
 
 buildings/
   castle-blue.png         ← Factions/Knights/Buildings/Castle/Castle_Blue.png

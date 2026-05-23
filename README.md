@@ -6,21 +6,32 @@ Built with [Tauri 2](https://v2.tauri.app/), [Phaser 4](https://phaser.io/), and
 
 🔗 Website: [https://danwahlin.github.io/kingdom-of-agents](https://danwahlin.github.io/kingdom-of-agents)
 
+![Kingdom of Agents dashboard](docs/img/dashboard.png)
+
 ## What it does
 
 Kingdom of Agents reads the local session state Copilot CLI already writes under `~/.copilot/session-state/` and turns each session into a district in a small medieval kingdom:
 
 | District | What it tracks |
 |----------|----------------|
-| **Forge** | File writes / `apply_patch` calls |
-| **Library** | Reads / search / `view` calls |
-| **Terminal Keep** | Shell commands / `bash` calls |
-| **Signal Tower** | Web fetches / external lookups |
-| **Guild Hall** | Sub-agent (`task`) calls |
-| **Tome Hall** | Skill (`skill`) calls |
-| **Royal Court** | Permission prompts and alerts |
+| **Forge** (Edits) | File writes / `apply_patch` calls |
+| **Library** (Reads) | Reads / search / `view` calls |
+| **Terminal Keep** (Commands) | Shell commands / `bash` calls |
+| **Signal Tower** (Web/Docs) | Web fetches / external lookups |
+| **Guild Hall** (Agents) | Sub-agent (`task`) calls |
+| **Tome Hall** (Skills) | Skill (`skill`) calls |
+| **Envoy House** (MCP) | MCP tool calls |
+| **Royal Court** (Intent) | Permission prompts and alerts |
+
+The dashboard panels on the left and right give you a live summary, the running session, and recent activity. A replay scrubber across the bottom lets you rewind the event timeline.
 
 Only sanitized session summaries cross the renderer bridge — prompts, tool arguments, command output, file paths, and diffs **never** leave the Rust backend.
+
+### Focus mode
+
+Click the 👁 button in the top-right to hide the side panels and put the kingdom front-and-center. Great for a second monitor.
+
+![Focus mode](docs/img/focus-mode.png)
 
 ## Install
 
@@ -51,7 +62,7 @@ The frontend mounts at `dist/game/index.html` and Playwright serves it via `pyth
 - **`src-tauri/src/lib.rs`** — Tauri commands (`get_agent_activity`, `open_in_editor`, etc.) and the tray icon. Uses `tauri-plugin-window-state` to persist window size/position across launches.
 - **`src/game/scenes/CodeKingdom.ts`** — the single Phaser scene. Renders districts, ops panel, replay timeline, session inspector, and the Tiny Swords assets in `assets/kingdom/tiny-swords/`.
 - **`src/game/game.ts`** — minimal Phaser bootstrap. One scene, opaque background, resizes with the window.
-- **`src/game/index.html` + `hud.js`** — slim 32 px top bar with brand and mute toggle. Nothing more.
+- **`src/game/index.html` + `hud.js`** — slim 32 px top bar with brand, panels toggle, and theme toggle.
 
 ## Assets
 
@@ -65,6 +76,18 @@ npm run release 0.2.0
 
 `scripts/release.js` bumps `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`, regenerates `CHANGELOG.md` via `git-cliff`, commits, tags `v0.2.0`, and pushes. The `Build & Release` workflow then builds installers for all three platforms and attaches them to the GitHub Release.
 
+## Regenerating the README screenshots
+
+The README and the GitHub Pages site share screenshots in `docs/img/`. To regenerate them after a UI change:
+
+```bash
+npm run build:frontend
+(cd dist && python3 -m http.server 4173) &
+node scripts/snap-readme.mjs
+kill %1
+```
+
 ## License
 
 MIT — see [`LICENSE`](./LICENSE). Tiny Swords assets are CC0 from Pixel Frog.
+

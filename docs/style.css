@@ -21,7 +21,7 @@ html, body {
 }
 
 .hero {
-  max-width: 760px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 64px 24px;
 }
@@ -79,6 +79,24 @@ h1 {
 .cta a.secondary:hover {
   border-color: var(--gold);
   color: var(--gold);
+}
+
+.shot {
+  margin: 0 0 36px;
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 213, 74, 0.18);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+}
+.shot figcaption {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .status {
