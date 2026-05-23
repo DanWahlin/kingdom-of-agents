@@ -655,6 +655,15 @@ code {
   color: var(--white);
 }
 
+.district-sub {
+  color: var(--white-dim);
+  font-weight: 500;
+  font-size: 0.78em;
+  letter-spacing: 0.02em;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
 .game-icon-emoji {
   width: 52px;
   height: 52px;
