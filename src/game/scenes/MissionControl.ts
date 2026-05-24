@@ -34,6 +34,9 @@ interface CopilotSessionSummary {
   command_count: number;
   web_count: number;
   task_count: number;
+  delegates_count?: number;
+  skills_count?: number;
+  court_count?: number;
   mcp_count?: number;
   error_count: number;
   turn_count?: number;
@@ -171,8 +174,7 @@ interface InsightCard {
   value: string;
   sub?: string;
   /// Optional shorter fallback sub-line used when `sub` doesn't fit
-  /// the card width. Lets the Tokens card show "12m in · 2m out" when
-  /// there's room and collapse to "12m/2m" on narrow viewports.
+  /// the card width.
   subCompact?: string;
   color?: string;
 }
@@ -193,6 +195,7 @@ declare global {
     __cmcUpdateModel?: (model: string) => void;
     __cmcSetPanelsHidden?: (hidden: boolean) => void;
     __cmcRenderDashboard?: (view: unknown) => void;
+    __cmcRenderQuarter?: (quarter: unknown) => void;
     __cmcSelectSession?: (id: string) => void;
     __cmcOpenSelectedSessionInEditor?: () => void;
     __cmcToggleReplayPause?: () => void;
@@ -524,6 +527,7 @@ export class MissionControlScene extends Phaser.Scene {
       if (next === this.panelsHidden) return;
       this.panelsHidden = next;
       this.layout = this.computeLayout();
+      this.selectedSession = this.pickSelectedSession();
       this.quarters = this.buildQuarters();
       this.renderActivity();
     };
@@ -749,24 +753,26 @@ export class MissionControlScene extends Phaser.Scene {
     this.map.clear();
 
     this.layout = this.computeLayout();
+    this.selectedSession = this.pickSelectedSession();
     this.quarters = this.buildQuarters();
     this.hoveredQuarterKey = this.hoveredQuarterIndex >= 0
       ? this.quarters[this.hoveredQuarterIndex]?.key ?? null
       : null;
     this.opsSummary = buildOpsSummary(this.activity);
-    // Surface the ops summary in the HTML top bar (hud.js owns the
-    // DOM). Guarded so tests / non-Tauri contexts without the HUD
-    // bridge don't crash.
-    try {
-      (window as any).__cmcUpdateOps?.(this.opsSummary, this.activity.alerts ?? []);
-    } catch { /* DOM not ready yet — next render will catch up */ }
-    this.selectedSession = this.pickSelectedSession();
     this.insightCards = this.buildInsightCards();
     this.pushSelectedModelToNavbar();
 
     this.drawBackground();
     this.drawQuarters();
     this.publishDashboardView();
+  }
+
+  private renderMapOnly() {
+    for (const text of this.textObjects) text.destroy();
+    this.textObjects = [];
+    this.map.clear();
+    this.drawBackground();
+    this.drawQuarters();
   }
 
   // Single source of truth for the dashboard layout. Computes panel
@@ -902,11 +908,7 @@ export class MissionControlScene extends Phaser.Scene {
   }
 
   private buildQuarters(): Quarter[] {
-    // Quarter badges show *recent* activity (last 24h) rather than
-    // lifetime totals so an idle building actually looks idle. Failed
-    // terminal calls are excluded — those aren't actionable for the dev
-    // and shouldn't inflate the Commands count.
-    const counts = this.compute24hCategoryCounts();
+    const counts = this.selectedSessionCategoryCounts();
 
     const layout = this.layout ?? this.computeLayout();
     const { centerX, centerY, radiusX, radiusY, topLift, s } = layout;
@@ -945,6 +947,20 @@ export class MissionControlScene extends Phaser.Scene {
         count: counts.get(spec.key) ?? 0,
       };
     });
+  }
+
+  private selectedSessionCategoryCounts(): Map<string, number> {
+    const session = this.selectedSession;
+    return new Map<string, number>([
+      ['forge', session?.write_count ?? 0],
+      ['library', session?.read_count ?? 0],
+      ['terminal', session?.command_count ?? 0],
+      ['signal', session?.web_count ?? 0],
+      ['delegates', session?.delegates_count ?? session?.task_count ?? 0],
+      ['skills', session?.skills_count ?? 0],
+      ['court', session?.court_count ?? 0],
+      ['mcp', session?.mcp_count ?? 0],
+    ]);
   }
 
   /// Recent activity per quarter (last 24h). Merges two sources to
@@ -996,28 +1012,15 @@ export class MissionControlScene extends Phaser.Scene {
   }
 
   private buildInsightCards(): InsightCard[] {
-    const turns = this.activity.total_turns ?? this.activity.sessions.reduce((sum, s) => sum + (s.turn_count ?? 0), 0);
-    const tools = this.activity.total_tool_calls;
-    const toolsPerTurn = turns > 0 ? tools / turns : 0;
-    const outputTokens = this.activity.total_output_tokens;
-    const inputTokens = this.activity.total_input_tokens ?? this.activity.sessions.reduce((sum, s) => sum + (s.input_tokens ?? 0), 0);
     const callsPerMin = this.computeToolCallsPerMin();
     const light = theme.mode === 'light';
-    // Accent colors for the four insight cards. Bright dark-theme tones
-    // (#60ff9a, #ff7a7a, #ffd54a) become hard to read on a white card in
+    // Bright dark-theme tones become hard to read on a white card in
     // light mode, so swap to darker AA-safe variants.
     const greenAccent = light ? '#1a7a3a' : '#60ff9a';
     const cyanAccent = light ? '#0a5a96' : '#61d6ff';
-    const purpleAccent = light ? '#5b3a8c' : '#c9a6ff';
-    const goldAccent = light ? theme.text : '#ffd54a';
-    const turnsSub = turns > 0
-      ? `${toolsPerTurn >= 10 ? toolsPerTurn.toFixed(0) : toolsPerTurn.toFixed(1)} tools/turn`
-      : 'no turns yet';
     return [
       { label: 'Active', value: String(this.activity.active_sessions), sub: `${this.activity.scanned_sessions} scanned`, color: this.activity.active_sessions > 0 ? greenAccent : theme.muted },
       { label: 'Tools/min', value: callsPerMin > 0 ? callsPerMin.toFixed(callsPerMin < 10 ? 1 : 0) : '0', sub: `${this.activity.total_tool_calls} total`, color: callsPerMin > 0 ? cyanAccent : theme.muted },
-      { label: 'Turns', value: compactNumber(turns), sub: turnsSub, color: turns > 0 ? purpleAccent : theme.muted },
-      { label: 'Tokens · 24h', value: compactNumber(inputTokens + outputTokens), sub: `${compactNumberShort(inputTokens)} in · ${compactNumberShort(outputTokens)} out`, subCompact: `${compactNumberShort(inputTokens)}/${compactNumberShort(outputTokens)}`, color: goldAccent },
     ];
   }
 
@@ -1241,31 +1244,35 @@ export class MissionControlScene extends Phaser.Scene {
     return this.quarters[0];
   }
 
-  /// Aggregate live stats for the quarter inspector: top tool, total
-  /// calls, average duration (when we have completed entries), and a
-  /// short tool list. Replaces the canned advice strings.
+  /// Selected-session stats for the quarter inspector: top tool,
+  /// selected-session call count, average duration (when we have
+  /// completed entries), and a short tool list.
   private computeQuarterStats(key: string): { line: string; toolList: string | null } {
-    const tools = this.activity.tools.filter(t => t.category === key);
+    const session = this.selectedSession;
+    const callCounts = new Map<string, number>();
+    for (const call of session?.recent_tool_calls ?? []) {
+      if (call.category !== key) continue;
+      const name = call.target || call.tool || call.category;
+      callCounts.set(name, (callCounts.get(name) ?? 0) + 1);
+    }
+    const tools = Array.from(callCounts.entries())
+      .map(([name, count]) => ({ name, count, category: key }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
     const topTool = tools[0];
-    const calls = tools.reduce((sum, t) => sum + t.count, 0);
+    const calls = this.selectedSessionCategoryCounts().get(key) ?? 0;
     let durSum = 0;
     let durCount = 0;
-    for (const session of this.activity.sessions) {
-      for (const call of session.recent_tool_calls ?? []) {
-        if (call.category === key && typeof call.duration_ms === 'number') {
-          durSum += call.duration_ms;
-          durCount++;
-        }
+    for (const call of session?.recent_tool_calls ?? []) {
+      if (call.category === key && typeof call.duration_ms === 'number') {
+        durSum += call.duration_ms;
+        durCount++;
       }
     }
     const avgMs = durCount > 0 ? Math.round(durSum / durCount) : 0;
-    // 24h count matches the quarter badge — same source so badge and
-    // inspector tell the same story instead of contradicting each other.
-    const last24 = this.compute24hCategoryCounts().get(key) ?? 0;
 
     const parts: string[] = [];
     if (topTool) parts.push(`top: ${topTool.name} (${topTool.count})`);
-    if (calls > 0) parts.push(`${last24}/24h`);
+    if (calls > 0) parts.push(`${calls} in selected session`);
     if (avgMs > 0) parts.push(`avg ${formatDuration(avgMs)}`);
     const line = parts.length > 0 ? parts.join(' · ') : 'No activity routed here yet.';
 
@@ -1273,6 +1280,37 @@ export class MissionControlScene extends Phaser.Scene {
       ? `Also: ${tools.slice(1).map(t => `${t.name} (${t.count})`).join(', ')}`
       : null;
     return { line, toolList };
+  }
+
+  private buildQuarterView() {
+    const quarter = this.activeInspectedQuarter();
+    if (!quarter) return null;
+    const quarterStats = this.computeQuarterStats(quarter.key);
+    const selected = this.selectedSession;
+    const flagged = selected && errorOrReview(selected);
+    const quarterFooter = selected
+      ? flagged
+        ? `! ${truncate(selected.title || selected.id, 28)} — ${selected.last_tool || 'tool'} failed ${formatAge(selected.stale_seconds)} ago`
+        : `Selected: ${truncate(selected.title || selected.id, 28)} · ${selected.status}`
+      : '';
+    return {
+      category: quarter.key,
+      color: colorToCss(quarter.color),
+      title: quarter.short,
+      countLine: `${quarter.count} selected-session ${quarter.short.toLowerCase()} signals`,
+      line: quarterStats.line,
+      toolList: quarterStats.toolList ?? '',
+      footer: quarterFooter,
+      footerAlert: Boolean(flagged),
+    };
+  }
+
+  private publishQuarterView() {
+    try {
+      window.__cmcRenderQuarter?.(this.buildQuarterView());
+    } catch {
+      /* DOM not ready yet — next full dashboard publish will catch up */
+    }
   }
 
   private publishDashboardView() {
@@ -1310,21 +1348,7 @@ export class MissionControlScene extends Phaser.Scene {
         category: event.category,
         success: event.success,
       }));
-    const quarter = this.activeInspectedQuarter();
-    const quarterStats = quarter ? this.computeQuarterStats(quarter.key) : null;
-    const quarterSessions = quarter
-      ? this.activity.sessions.filter(s => this.pickQuarterForSession(s).key === quarter.key)
-      : [];
-    const flagged = quarter
-      ? quarterSessions.filter(quarter.key === 'terminal'
-          ? (s: CopilotSessionSummary) => s.status === 'needs-attention'
-          : errorOrReview)
-      : [];
-    const quarterFooter = quarter && flagged.length > 0
-      ? `! ${truncate(flagged[0].title || flagged[0].id, 28)} — ${flagged[0].last_tool || 'tool'} failed ${formatAge(flagged[0].stale_seconds)} ago${flagged.length > 1 ? ` (+${flagged.length - 1} more)` : ''}`
-      : quarterSessions.length > 0
-        ? `${quarterSessions.length} ${quarterSessions.length === 1 ? 'session' : 'sessions'} routed here · ${quarterSessions.filter(s => s.is_active).length} active`
-        : '';
+    const quarter = this.buildQuarterView();
     const work = workMix(this.activity);
     const total = this.eventLog.length;
     const cursor = this.replayCursor;
@@ -1383,6 +1407,9 @@ export class MissionControlScene extends Phaser.Scene {
             command: session.command_count ?? 0,
             web: session.web_count ?? 0,
             task: session.task_count ?? 0,
+            delegates: session.delegates_count ?? session.task_count ?? 0,
+            skills: session.skills_count ?? 0,
+            court: session.court_count ?? 0,
             mcp: session.mcp_count ?? 0,
           },
         })),
@@ -1395,16 +1422,7 @@ export class MissionControlScene extends Phaser.Scene {
           ? 'No recent Copilot events found. Start a Copilot CLI session and this mission control will wake up.'
           : 'Copilot CLI was not detected. Install or run Copilot CLI to populate this mission.',
       },
-      quarter: quarter ? {
-        category: quarter.key,
-        color: colorToCss(quarter.color),
-        title: quarter.short,
-        countLine: `${quarter.count} recent ${quarter.short.toLowerCase()} signals`,
-        line: quarterStats?.line ?? '',
-        toolList: quarterStats?.toolList ?? '',
-        footer: quarterFooter,
-        footerAlert: flagged.length > 0,
-      } : null,
+      quarter,
       replay: {
         paused: this.replayPaused,
         atLive,
@@ -1462,6 +1480,7 @@ export class MissionControlScene extends Phaser.Scene {
     }
     if (next !== this.hoveredQuarterIndex) {
       this.hoveredQuarterIndex = next;
+      this.hoveredQuarterKey = next >= 0 ? this.quarters[next]?.key ?? null : null;
       // Hovering a new quarter promotes it to the sticky-hover key so
       // the inspector keeps showing it after the pointer leaves the ring.
       // We only WRITE on transition into a quarter (next >= 0) — when
@@ -1474,7 +1493,8 @@ export class MissionControlScene extends Phaser.Scene {
           savePref('inspectedQuarterKey', this.inspectedQuarterKey);
         }
       }
-      this.renderActivity();
+      this.renderMapOnly();
+      this.publishQuarterView();
     }
   }
 
@@ -1850,16 +1870,22 @@ export class MissionControlScene extends Phaser.Scene {
   private pickSelectedSession() {
     const sessions = this.activity.sessions;
     if (sessions.length === 0) return null;
-    // Honor a sticky id from prefs first — session order can change
-    // between scans, so tracking by id keeps the user pinned to the
-    // session they were actually inspecting.
+    const activeSessions = sessions.filter(session => session.is_active);
+    // Honor a sticky id from prefs only when it points at a selectable
+    // current session. If an old inactive session from the same repo is
+    // persisted while new work is active, showing that stale detail card
+    // beside a "Running sessions" picker makes Last/Age/Tokens look
+    // broken.
     if (this.userSelectedSession) {
       const prefs = loadMissionPrefs();
       if (prefs.lastSelectedSessionId) {
         const idx = sessions.findIndex(s => s.id === prefs.lastSelectedSessionId);
-        if (idx >= 0) {
+        if (idx >= 0 && (activeSessions.length === 0 || sessions[idx].is_active)) {
           this.selectedSessionIndex = idx;
           return sessions[idx];
+        }
+        if (idx >= 0 && activeSessions.length > 0) {
+          this.userSelectedSession = false;
         }
       }
     }
@@ -1872,7 +1898,10 @@ export class MissionControlScene extends Phaser.Scene {
         return reviewSession;
       }
     }
-    return sessions[safeIndex] ?? sessions.find(session => session.is_active) ?? sessions[0];
+    if (sessions[safeIndex]?.is_active || activeSessions.length === 0) return sessions[safeIndex];
+    const active = activeSessions[0];
+    this.selectedSessionIndex = sessions.indexOf(active);
+    return active;
   }
 
   /// Push the currently-selected session's model id to the navbar
@@ -2130,10 +2159,10 @@ function createDemoActivity(): CopilotActivity {
     total_tool_calls: 140,
     total_output_tokens: 24380,
     sessions: [
-      { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 128, tool_count: 55, write_count: 16, read_count: 22, command_count: 10, web_count: 3, task_count: 4, error_count: 0, output_tokens: 9800, last_tool: 'apply_patch', last_event_category: 'forge' },
-      { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 96, tool_count: 42, write_count: 5, read_count: 14, command_count: 18, web_count: 0, task_count: 5, error_count: 2, output_tokens: 6120, last_tool: 'bash', last_event_category: 'alert' },
-      { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: true, status: 'thinking', event_count: 74, tool_count: 28, write_count: 1, read_count: 11, command_count: 1, web_count: 13, task_count: 2, error_count: 0, output_tokens: 5450, last_tool: 'web_fetch', last_event_category: 'signal' },
-      { id: 'delta321', title: 'Plan Refactor', repository: 'copilot-mission-control', branch: 'feature/mission', updated_at: '', is_active: false, status: 'idle', event_count: 62, tool_count: 15, write_count: 2, read_count: 8, command_count: 1, web_count: 1, task_count: 3, error_count: 0, output_tokens: 3010, last_tool: 'task', last_event_category: 'delegates' },
+      { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 128, tool_count: 55, write_count: 16, read_count: 22, command_count: 10, web_count: 3, task_count: 4, delegates_count: 4, skills_count: 0, court_count: 4, error_count: 0, output_tokens: 9800, last_tool: 'apply_patch', last_event_category: 'forge' },
+      { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 96, tool_count: 42, write_count: 5, read_count: 14, command_count: 18, web_count: 0, task_count: 5, delegates_count: 3, skills_count: 2, court_count: 1, error_count: 2, output_tokens: 6120, last_tool: 'bash', last_event_category: 'alert' },
+      { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: true, status: 'thinking', event_count: 74, tool_count: 28, write_count: 1, read_count: 11, command_count: 1, web_count: 13, task_count: 2, delegates_count: 2, skills_count: 0, court_count: 0, error_count: 0, output_tokens: 5450, last_tool: 'web_fetch', last_event_category: 'signal' },
+      { id: 'delta321', title: 'Plan Refactor', repository: 'copilot-mission-control', branch: 'feature/mission', updated_at: '', is_active: false, status: 'idle', event_count: 62, tool_count: 15, write_count: 2, read_count: 8, command_count: 1, web_count: 1, task_count: 3, delegates_count: 3, skills_count: 0, court_count: 0, error_count: 0, output_tokens: 3010, last_tool: 'task', last_event_category: 'delegates' },
     ],
     tools: [
       { name: 'view', category: 'library', count: 33 },
@@ -2199,7 +2228,10 @@ function applyDemoEvent(activity: CopilotActivity, event: CopilotEventSummary): 
       read_count: quarterKey === 'library' ? session.read_count + 1 : session.read_count,
       command_count: quarterKey === 'terminal' ? session.command_count + 1 : session.command_count,
       web_count: quarterKey === 'signal' ? session.web_count + 1 : session.web_count,
-      task_count: quarterKey === 'delegates' ? session.task_count + 1 : session.task_count,
+      task_count: quarterKey === 'delegates' || quarterKey === 'skills' ? session.task_count + 1 : session.task_count,
+      delegates_count: quarterKey === 'delegates' ? (session.delegates_count ?? session.task_count ?? 0) + 1 : (session.delegates_count ?? session.task_count ?? 0),
+      skills_count: quarterKey === 'skills' ? (session.skills_count ?? 0) + 1 : (session.skills_count ?? 0),
+      court_count: quarterKey === 'court' ? (session.court_count ?? 0) + 1 : (session.court_count ?? 0),
       mcp_count: quarterKey === 'mcp' ? (session.mcp_count ?? 0) + 1 : (session.mcp_count ?? 0),
       error_count: event.success ? session.error_count : session.error_count + 1,
       output_tokens: session.output_tokens + 120,

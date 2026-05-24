@@ -66,6 +66,12 @@ pub struct AgentSessionSummary {
     pub command_count: usize,
     pub web_count: usize,
     pub task_count: usize,
+    #[serde(default)]
+    pub delegates_count: usize,
+    #[serde(default)]
+    pub skills_count: usize,
+    #[serde(default)]
+    pub court_count: usize,
     /// Tools served by MCP servers (github-mcp-server-*, context7-*,
     /// kit-dev-mcp-*, etc.) — separate bucket because they sit on a
     /// dedicated quarter in the renderer.
@@ -869,7 +875,12 @@ fn summarize_events(
 
         summary.event_count += 1;
         let event_category = categorize_event(event_type).to_string();
-        record_last_event(summary, &timestamp, event_type, &event_category);
+        if !matches!(
+            event_type,
+            "session.compaction_complete" | "session.shutdown"
+        ) {
+            record_last_event(summary, &timestamp, event_type, &event_category);
+        }
 
         // Many event types carry `data.model` (assistant.message,
         // tool.execution_start/complete, assistant.streaming_delta,
@@ -926,7 +937,15 @@ fn summarize_events(
                 "library" => summary.read_count += 1,
                 "terminal" => summary.command_count += 1,
                 "signal" => summary.web_count += 1,
-                "delegates" | "skills" => summary.task_count += 1,
+                "delegates" => {
+                    summary.task_count += 1;
+                    summary.delegates_count += 1;
+                }
+                "skills" => {
+                    summary.task_count += 1;
+                    summary.skills_count += 1;
+                }
+                "court" => summary.court_count += 1,
                 "mcp" => summary.mcp_count += 1,
                 _ => {}
             }
@@ -2097,6 +2116,49 @@ mod tests {
         );
         // Output: shutdown's 2M wins over the per-message 1K (max()).
         assert_eq!(summary.output_tokens, 2_000_000);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn shutdown_does_not_replace_last_meaningful_event() {
+        use std::io::Write;
+        let mut path = std::env::temp_dir();
+        path.push("cmc_test_shutdown_last_event.jsonl");
+        let _ = std::fs::remove_file(&path);
+        {
+            let mut f = std::fs::File::create(&path).expect("create temp jsonl");
+            writeln!(
+                f,
+                r#"{{"type":"tool.execution_start","timestamp":"2026-01-01T00:00:01.000Z","data":{{"toolName":"bash","toolCallId":"call-bash","turnId":"turn-current"}}}}"#
+            )
+            .unwrap();
+            writeln!(
+                f,
+                r#"{{"type":"session.shutdown","timestamp":"2026-01-01T00:00:02.000Z","data":{{"tokenDetails":{{"input":{{"tokenCount":100}},"cache_write":{{"tokenCount":50}},"output":{{"tokenCount":25}}}}}}}}"#
+            )
+            .unwrap();
+        }
+
+        let mut summary = AgentSessionSummary::default();
+        let mut tool_counts = BTreeMap::new();
+        let mut recent_events = Vec::new();
+        let allowlist = HashSet::new();
+        summarize_events(
+            "test",
+            &path,
+            "test-session",
+            &mut summary,
+            &mut tool_counts,
+            &mut recent_events,
+            &allowlist,
+        );
+
+        assert_eq!(summary.last_event_kind, "tool.execution_start");
+        assert_eq!(summary.last_event_category, "terminal");
+        assert_eq!(summary.last_tool, "bash");
+        assert_eq!(summary.input_tokens, 150);
+        assert_eq!(summary.output_tokens, 25);
 
         let _ = std::fs::remove_file(&path);
     }

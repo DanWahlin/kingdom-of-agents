@@ -11,9 +11,9 @@ const MISSION_FIXTURE = {
   total_tool_calls: 47,
   total_output_tokens: 8120,
   sessions: [
-    { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 82, tool_count: 23, write_count: 8, read_count: 9, command_count: 4, web_count: 1, task_count: 1, error_count: 0, output_tokens: 4200, last_tool: 'apply_patch', last_event_kind: 'tool.execution_start', last_event_category: 'forge', stale_seconds: 12 },
-    { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 64, tool_count: 17, write_count: 2, read_count: 7, command_count: 6, web_count: 0, task_count: 2, error_count: 1, output_tokens: 2920, last_tool: 'bash', last_event_kind: 'tool.execution_complete', last_event_category: 'alert', stale_seconds: 25 },
-    { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: false, status: 'idle', event_count: 38, tool_count: 7, write_count: 0, read_count: 3, command_count: 0, web_count: 4, task_count: 0, error_count: 0, output_tokens: 1000, last_tool: 'web_fetch', last_event_kind: 'tool.execution_start', last_event_category: 'signal', stale_seconds: 900 },
+    { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 82, tool_count: 23, write_count: 8, read_count: 9, command_count: 4, web_count: 1, task_count: 3, delegates_count: 1, skills_count: 2, court_count: 4, mcp_count: 1, error_count: 0, output_tokens: 4200, last_tool: 'apply_patch', last_event_kind: 'tool.execution_start', last_event_category: 'forge', stale_seconds: 12 },
+    { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 64, tool_count: 17, write_count: 2, read_count: 7, command_count: 6, web_count: 0, task_count: 5, delegates_count: 2, skills_count: 3, court_count: 1, mcp_count: 4, error_count: 1, output_tokens: 2920, last_tool: 'bash', last_event_kind: 'tool.execution_complete', last_event_category: 'alert', stale_seconds: 25 },
+    { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: false, status: 'idle', event_count: 38, tool_count: 7, write_count: 0, read_count: 3, command_count: 0, web_count: 4, task_count: 0, delegates_count: 0, skills_count: 0, court_count: 0, mcp_count: 0, error_count: 0, output_tokens: 1000, last_tool: 'web_fetch', last_event_kind: 'tool.execution_start', last_event_category: 'signal', stale_seconds: 900 },
   ],
   tools: [
     { name: 'view', category: 'library', count: 14 },
@@ -97,6 +97,7 @@ async function getMissionState(page: Page) {
       quarterRects: (scene.quarters ?? []).map((d: any) => ({
         key: d.key, x: d.x, y: d.y,
       })),
+      quarterCounts: Object.fromEntries((scene.quarters ?? []).map((d: any) => [d.key, d.count])),
       inspectedQuarterKey: scene.inspectedQuarterKey ?? null,
       hoveredQuarterIndex: scene.hoveredQuarterIndex ?? -1,
     };
@@ -252,18 +253,34 @@ test.describe('Copilot Mission Control — Startup', () => {
     expect(state!.sessionCount).toBe(3);
     expect(state!.quarterCount).toBe(8);
     expect(state!.scannedSessions).toBe(3);
-    expect(state!.insightLabels).toContain('Tokens · 24h');
+    expect(state!.insightLabels).toEqual(['Active', 'Tools/min']);
     expect(state!.opsAttention).toBe('review');
     expect(state!.opsRecommendation).toMatch(/failed.*in /);
     expect(state!.selectedSessionId).toBe('beta4567');
+    expect(state!.quarterCounts).toEqual({
+      forge: 2,
+      library: 7,
+      terminal: 6,
+      signal: 0,
+      delegates: 2,
+      skills: 3,
+      court: 1,
+      mcp: 4,
+    });
   });
 
   test('top bar HUD elements are present', async ({ page }) => {
     await expect(page.locator('#topbar .brand')).toBeVisible();
-    await expect(page.locator('#topbar-metrics .topbar-metric')).toHaveCount(4);
+    await expect(page.locator('#topbar-metrics .topbar-metric')).toHaveCount(2);
     await expect(page.locator('#topbar-metrics')).toContainText('Active');
-    await expect(page.locator('#topbar-metrics')).toContainText(/Tokens\s*\d+\/\d+k?/);
+    await expect(page.locator('#topbar-metrics')).toContainText('Tools/min');
+    await expect(page.locator('#topbar-metrics')).not.toContainText('Turns');
+    await expect(page.locator('#topbar-metrics')).not.toContainText('Tokens');
+    await expect(page.locator('#ops-chip')).toHaveCount(0);
+    await expect(page.locator('#ops-rec')).toHaveCount(0);
+    await expect(page.locator('#topbar-controls')).toBeVisible();
     await expect(page.locator('#theme-btn')).toBeVisible();
+    await expect(page.locator('#theme-btn')).toHaveAttribute('aria-label', /Switch to light theme|Switch to dark theme/);
   });
 });
 
@@ -303,6 +320,56 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(layout.lastWorkRow!.bottom).toBeLessThanOrEqual(layout.workMix!.bottom - 8);
     expect(layout.feed!.top).toBeGreaterThanOrEqual(layout.workMix!.bottom + 8);
     expect(layout.feed!.bottom).toBeLessThanOrEqual(layout.replay!.top - 8);
+  });
+
+  test('selected session summary uses recent meaningful tool activity', async ({ page }) => {
+    const fixture = JSON.parse(JSON.stringify(MISSION_FIXTURE));
+    const beta = fixture.sessions.find((session: any) => session.id === 'beta4567');
+    const now = Date.now();
+    beta.last_event_kind = 'session.shutdown';
+    beta.last_event_category = 'complete';
+    beta.last_event_timestamp = new Date(now - 2 * 60 * 60 * 1000).toISOString();
+    beta.stale_seconds = 7200;
+    beta.last_tool = 'report_intent';
+    beta.recent_tool_calls = [
+      {
+        tool: 'bash',
+        category: 'terminal',
+        timestamp: new Date(now - 2000).toISOString(),
+        completed_at: new Date(now - 1000).toISOString(),
+        success: true,
+        duration_ms: 1000,
+        call_id: 'call-bash-current',
+        turn_id: 'turn-current',
+        target: 'bash',
+        details: [],
+      },
+      {
+        tool: 'report_intent',
+        category: 'court',
+        timestamp: new Date(now).toISOString(),
+        completed_at: new Date(now).toISOString(),
+        success: true,
+        duration_ms: 0,
+        call_id: 'call-intent-current',
+        turn_id: 'turn-current',
+        target: 'report_intent',
+        details: [],
+      },
+    ];
+
+    await page.addInitScript((f) => { (window as any).__missionControlFixture = f; }, fixture);
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    const text = await page.locator('#dom-session').innerText();
+    expect(text).toContain('Last: bash completed');
+    expect(text).toContain('Tool: bash');
+    expect(text).toContain('Tokens in/out: 0/3k');
+    expect(text).toMatch(/Age: \d+s/);
+    expect(text).not.toContain('session.shutdown');
+    expect(text).not.toContain('report_intent');
+    expect(text).not.toContain('Age: 2h');
   });
 
   test('bootstrap suppresses live pulses so historical events do not animate', async ({ page }) => {
@@ -386,6 +453,21 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(after!.replayState.atLive).toBe(false);
   });
 
+  test('replay timeline exposes keyboard slider controls', async ({ page }) => {
+    const track = page.locator('#dom-replay [data-cmc-action="replay-seek"]');
+    await expect(track).toHaveAttribute('role', 'slider');
+    await track.focus();
+    await page.keyboard.press('Home');
+    await page.waitForTimeout(120);
+    let state = await getMissionState(page);
+    expect(state!.replayState.cursor).toBe(0);
+
+    await page.keyboard.press('ArrowRight');
+    await page.waitForTimeout(120);
+    state = await getMissionState(page);
+    expect(state!.replayState.cursor).toBe(1);
+  });
+
   test('clicking a running session selects it for inspection', async ({ page }) => {
     const before = await getMissionState(page);
     expect(before!.selectedSessionId).toBe('beta4567');
@@ -394,6 +476,58 @@ test.describe('Copilot Mission Control — Dashboard', () => {
 
     const after = await getMissionState(page);
     expect(after!.selectedSessionId).toBe('alpha123');
+    expect(after!.quarterCounts).toMatchObject({
+      forge: 8,
+      library: 9,
+      terminal: 4,
+      signal: 1,
+      delegates: 1,
+      skills: 2,
+      court: 4,
+      mcp: 1,
+    });
+  });
+
+  test('stale persisted selection is ignored when a running session exists', async ({ page }) => {
+    const fixture = JSON.parse(JSON.stringify(MISSION_FIXTURE));
+    fixture.sessions.push({
+      id: 'stale999',
+      title: 'Stale Same Repo',
+      repository: 'copilot-mission-control',
+      branch: 'main',
+      updated_at: '',
+      is_active: false,
+      status: 'idle',
+      event_count: 10,
+      tool_count: 3,
+      write_count: 0,
+      read_count: 1,
+      command_count: 2,
+      web_count: 0,
+      task_count: 0,
+      error_count: 0,
+      output_tokens: 60000,
+      input_tokens: 669000,
+      last_tool: 'bash',
+      last_event_kind: 'session.shutdown',
+      last_event_category: 'complete',
+      stale_seconds: 7200,
+      recent_tool_calls: [],
+    });
+
+    await page.addInitScript((f) => {
+      localStorage.setItem('cmc_prefs', JSON.stringify({ lastSelectedSessionId: 'stale999' }));
+      (window as any).__missionControlFixture = f;
+    }, fixture);
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    const state = await getMissionState(page);
+    expect(state!.selectedSessionId).not.toBe('stale999');
+    expect(state!.selectedSessionId).toBe('beta4567');
+    const text = await page.locator('#dom-session').innerText();
+    expect(text).not.toContain('669k/60k');
+    expect(text).not.toContain('Age: 2h');
   });
 
   test('inspector filters MCP, skills, and sub-agent calls with safe details', async ({ page }) => {
@@ -430,6 +564,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
 
     await page.keyboard.press('Escape');
     await expect(page.locator('#inspector-overlay')).not.toHaveClass(/visible/);
+    await expect(page.locator('#dom-session [data-cmc-action="inspector"]')).toBeFocused();
   });
 
   test('inspector turn mode shows turn-by-turn story and related tools', async ({ page }) => {
@@ -478,6 +613,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
         color: style.scrollbarColor,
       };
     });
+
     expect(scrollbarStyle.gutter).toContain('stable');
     expect(scrollbarStyle.color).not.toBe('auto');
     const box = await list.boundingBox();

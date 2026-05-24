@@ -3,7 +3,7 @@
 //
 // Backend responsibilities:
 //   - Host a single decorated, resizable window
-//   - Save/restore window size + position across launches (window-state plugin)
+//   - Save/restore window position across launches (window-state plugin)
 //   - Expose Copilot CLI session summaries to the renderer via
 //     `get_copilot_activity` / `get_agent_activity`
 //   - Watch the local Copilot state directory and push refresh
@@ -20,6 +20,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Manager,
 };
+use tauri_plugin_window_state::StateFlags;
 
 use agent::{collect_agent_activity, AgentActivity};
 
@@ -136,7 +137,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::POSITION)
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             show_window(app);
         }))

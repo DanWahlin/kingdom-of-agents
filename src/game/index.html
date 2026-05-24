@@ -18,10 +18,9 @@
     }
     body.theme-light, body.theme-light html { background: #f4f7fb; color: #1f2937; }
 
-    /* Top navigation bar — app brand, live ops status, and the theme
-       toggle. The ops chip + recommendation + alerts that used to live
-       in the canvas as a separate panel are surfaced here so the
-       mission view itself stays uncluttered. */
+    /* Top navigation bar — app brand, live metrics, and right-aligned
+       controls. Operational detail lives in the dashboard panels so the
+       bar stays quiet while users work in Copilot. */
     #topbar {
       position: fixed;
       top: 0;
@@ -30,7 +29,7 @@
       height: 40px;
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 10px;
       padding: 0 16px;
       background:
         linear-gradient(180deg, #1d2a55 0%, #131b39 60%, #0d1430 100%);
@@ -68,6 +67,7 @@
       display: flex;
       align-items: center;
       gap: 8px;
+      flex: 0 1 auto;
       min-width: 0;
       overflow: hidden;
     }
@@ -104,70 +104,12 @@
       color: #334155;
     }
     body.theme-light .topbar-metric-label { color: #64748b; }
-    #topbar .divider {
-      width: 1px;
-      height: 18px;
-      background: rgba(255, 213, 74, 0.35);
-    }
-    body.theme-light #topbar .divider { background: rgba(100, 116, 139, 0.35); }
-
-    /* Live ops chip — status word colored by attention severity. */
-    #ops-chip {
+    #topbar-controls {
+      margin-left: auto;
       display: inline-flex;
       align-items: center;
-      padding: 4px 10px;
-      border-radius: 12px;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      white-space: nowrap;
-    }
-    #ops-chip.calm   { background: rgba(96, 255, 154, 0.18); color: #60ff9a; border: 1px solid rgba(96,255,154,0.55); }
-    #ops-chip.watch  { background: rgba(255, 213, 74, 0.20); color: #ffd54a; border: 1px solid rgba(255,213,74,0.65); }
-    #ops-chip.review { background: rgba(255, 82, 82, 0.22);  color: #ff8a8a; border: 1px solid rgba(255,82,82,0.7); }
-    body.theme-light #ops-chip.calm   { background: rgba(34, 156, 78, 0.18);  color: #1f7a3a;  border: 1px solid rgba(34,156,78,0.55); }
-    body.theme-light #ops-chip.watch  { background: #fff7ed; color: #9a3412;  border: 1px solid #fed7aa; }
-    body.theme-light #ops-chip.review { background: rgba(190, 28, 28, 0.18);  color: #a01818;  border: 1px solid rgba(190,28,28,0.65); }
-
-    /* Recommendation ticker — single-line truncated to fit available
-       width; full text visible on hover via title attribute. */
-    #ops-rec {
-      flex: 1;
+      gap: 8px;
       min-width: 0;
-      color: #dde4ff;
-      font-size: 12px;
-      letter-spacing: 0.02em;
-      text-transform: none;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    #ops-rec.muted { color: #93a4d8; font-style: italic; }
-    body.theme-light #ops-rec { color: #334155; }
-    body.theme-light #ops-rec.muted { color: #64748b; }
-
-    /* Alert badge — only shown when activity.alerts has entries. */
-    #ops-alert {
-      display: none;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 12px;
-      background: rgba(255, 82, 82, 0.18);
-      border: 1px solid rgba(255, 82, 82, 0.7);
-      color: #ff8a8a;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      cursor: help;
-    }
-    #ops-alert.visible { display: inline-flex; }
-    body.theme-light #ops-alert {
-      background: rgba(190, 28, 28, 0.14);
-      border-color: rgba(190, 28, 28, 0.6);
-      color: #a01818;
     }
 
     #topbar button {
@@ -248,12 +190,10 @@
     }
 
     /* Active model chip — shows the model id (e.g. "gpt-5.5") for the
-       currently-inspected session. Sits to the left of the theme
-       button; `margin-left: auto` shoves it (and the theme button)
-       all the way to the right side of the topbar. Hidden until the
-       scene reports a model so we never flash an empty pill on load. */
+       currently-inspected session. Hidden until the scene reports a
+       model so we never flash an empty pill on load. */
     #model-chip {
-      margin-left: auto;
+      flex: 0 1 auto;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 11px;
       letter-spacing: 0.04em;
@@ -273,6 +213,20 @@
       background: #f8fafc;
       color: #334155;
       border-color: #cbd5e1;
+    }
+    @media (max-width: 1280px) {
+      #topbar {
+        gap: 8px;
+        padding: 0 10px;
+        font-size: 12px;
+      }
+      #topbar .brand { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+      .topbar-metric { max-width: 118px; padding: 4px 7px; gap: 4px; }
+      #model-chip { max-width: 170px; }
+    }
+    @media (max-width: 1040px) {
+      #model-chip { max-width: 120px; }
+      .topbar-metric { max-width: 104px; }
     }
 
     /* HTML inspector overlay. Phaser still owns the mission map; this
@@ -404,43 +358,11 @@
       padding: 12px;
       box-sizing: border-box;
     }
-    .inspector-list::-webkit-scrollbar,
-    .inspector-detail::-webkit-scrollbar {
-      width: 16px;
-      height: 16px;
-    }
-    .inspector-list::-webkit-scrollbar-track,
-    .inspector-detail::-webkit-scrollbar-track {
-      background: #07102b;
-      border-left: 1px solid #31437a;
-      border-radius: 10px;
-    }
-    .inspector-list::-webkit-scrollbar-thumb,
-    .inspector-detail::-webkit-scrollbar-thumb {
-      background: linear-gradient(180deg, #9fb0ff 0%, #6076d8 100%);
-      border: 3px solid #07102b;
-      border-radius: 999px;
-      min-height: 44px;
-    }
-    .inspector-list::-webkit-scrollbar-thumb:hover,
-    .inspector-detail::-webkit-scrollbar-thumb:hover {
-      background: linear-gradient(180deg, #c3ceff 0%, #7f97ef 100%);
-    }
     body.theme-light .inspector-list,
     body.theme-light .inspector-detail {
       background: #f7f9fd;
       border-color: #d6dee9;
       scrollbar-color: #6f83cc #e0e6f3;
-    }
-    body.theme-light .inspector-list::-webkit-scrollbar-track,
-    body.theme-light .inspector-detail::-webkit-scrollbar-track {
-      background: #e0e6f3;
-      border-left-color: #d6dee9;
-    }
-    body.theme-light .inspector-list::-webkit-scrollbar-thumb,
-    body.theme-light .inspector-detail::-webkit-scrollbar-thumb {
-      background: linear-gradient(180deg, #8ca0e6 0%, #5f73bd 100%);
-      border-color: #e0e6f3;
     }
     .inspector-row {
       width: 100%;
@@ -708,9 +630,6 @@
     .cmc-label, .cmc-muted { color: #93a4d8; }
     body.theme-light .cmc-label, body.theme-light .cmc-muted { color: #64748b; }
     .cmc-label { font-size: 12px; line-height: 1.4; }
-    .cmc-value { margin-top: 8px; font-size: 19px; line-height: 1.1; color: #e8ecff; }
-    body.theme-light .cmc-value { color: #1f2937; }
-    .cmc-sub { margin-top: 6px; font-size: 10px; color: #93a4d8; line-height: 1.3; }
     #dom-workmix .cmc-panel-body {
       overflow: hidden;
     }
@@ -751,13 +670,7 @@
     }
     .cmc-bar { height: 10px; border-radius: 999px; background: #1a2448; overflow: hidden; }
     .cmc-bar span { display: block; height: 100%; min-width: 12px; border-radius: 999px; background: var(--bar-color, #61d6ff); }
-    .cmc-session-list {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 6px;
-      margin-bottom: 8px;
-    }
-    .cmc-session-row, .cmc-feed-row {
+    .cmc-feed-row {
       width: 100%;
       border: 1px solid rgba(127, 151, 239, 0.44);
       border-radius: 8px;
@@ -768,24 +681,67 @@
       font: inherit;
       text-align: left;
     }
-    .cmc-session-row { display: grid; grid-template-columns: 10px 1fr; gap: 8px; align-items: center; cursor: pointer; }
-    .cmc-session-row.selected { background: rgba(96, 255, 154, 0.20); border-color: rgba(96, 255, 154, 0.9); }
-    body.theme-light .cmc-session-row,
     body.theme-light .cmc-feed-row {
       background: #ffffff;
       border-color: #d6dee9;
     }
-    body.theme-light .cmc-session-row.selected {
-      background: #ecfdf5;
-      border-color: #86efac;
-    }
     .cmc-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dot, #60ff9a); }
-    .cmc-session-title { font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .cmc-session-id { font-size: 10px; padding: 4px 7px; border-radius: 4px; background: rgba(2, 7, 19, 0.7); color: #e6ecf8; }
-    body.theme-light .cmc-session-id { background: #334155; color: #f8fafc; }
     .cmc-session-picker { margin-bottom: 8px; }
     .cmc-session-picker .cmc-select { width: 100%; }
-    .cmc-detail-rows { display: grid; gap: 4px; margin: 6px 0 8px; font-size: 11px; line-height: 1.25; }
+    .cmc-session-summary {
+      display: grid;
+      gap: 8px;
+      padding: 10px 12px;
+      margin: 8px 0;
+      border: 1px solid rgba(96, 255, 154, 0.58);
+      border-radius: 12px;
+      background:
+        radial-gradient(circle at 18px 16px, rgba(96, 255, 154, 0.22), transparent 52px),
+        linear-gradient(180deg, rgba(34, 156, 78, 0.24), rgba(16, 24, 51, 0.74));
+      box-shadow:
+        inset 0 0 0 1px rgba(96, 255, 154, 0.12),
+        0 0 18px rgba(96, 255, 154, 0.08);
+    }
+    body.theme-light .cmc-session-summary {
+      background:
+        radial-gradient(circle at 18px 16px, rgba(34, 197, 94, 0.18), transparent 52px),
+        linear-gradient(180deg, #ecfdf5, #ffffff);
+      border-color: #86efac;
+      box-shadow: 0 8px 20px rgba(22, 163, 74, 0.1);
+    }
+    .cmc-session-heading {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .cmc-session-title {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      color: #f5f7ff;
+    }
+    body.theme-light .cmc-session-title { color: #1f2937; }
+    .cmc-meta-pill {
+      border: 1px solid rgba(127, 151, 239, 0.36);
+      border-radius: 999px;
+      padding: 4px 7px;
+      white-space: nowrap;
+      background: rgba(2, 7, 19, 0.28);
+    }
+    .cmc-session-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-size: 10px;
+      line-height: 1.25;
+    }
+    body.theme-light .cmc-meta-pill {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
     .cmc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
     .cmc-button {
       border: 1px solid rgba(165, 177, 216, 0.7);
@@ -933,7 +889,8 @@
       padding: 8px 14px;
       box-sizing: border-box;
     }
-    .cmc-replay-track { position: relative; height: 22px; cursor: pointer; }
+    .cmc-replay-track { position: relative; height: 22px; cursor: pointer; outline: none; }
+    .cmc-replay-track:focus-visible { box-shadow: 0 0 0 2px #ffd54a; border-radius: 8px; }
     .cmc-replay-rail { position: absolute; left: 0; right: 0; top: 6px; height: 10px; border-radius: 999px; background: #1a2448; overflow: hidden; }
     .cmc-replay-fill { height: 100%; border-radius: 999px; background: #60ff9a; width: 0%; }
     .cmc-replay-knob { position: absolute; top: -1px; width: 8px; height: 24px; background: #60ff9a; transform: translateX(-4px); }
@@ -948,9 +905,11 @@
   <div id="topbar">
     <span class="brand">Copilot Mission Control</span>
     <span id="topbar-metrics" aria-label="Live session metrics"></span>
-    <span id="model-chip" class="empty" title="Active model for the selected session"></span>
-    <button id="panels-btn" type="button" title="Hide side panels for focus mode"></button>
-    <button id="theme-btn" type="button" title="Toggle light/dark theme">🌙</button>
+    <span id="topbar-controls">
+      <span id="model-chip" class="empty" title="Active model for the selected session"></span>
+      <button id="panels-btn" type="button" title="Hide side panels for focus mode" aria-label="Hide side panels for focus mode"></button>
+      <button id="theme-btn" type="button" title="Toggle light/dark theme" aria-label="Switch to light theme">🌙</button>
+    </span>
   </div>
 
   <div id="game"></div>
@@ -964,12 +923,12 @@
     <section id="dom-session" class="cmc-panel"><div class="cmc-panel-title">Selected Session</div><div class="cmc-panel-body"></div></section>
     <section id="dom-workmix" class="cmc-panel"><div class="cmc-panel-title">Recent Work Mix</div><div class="cmc-panel-body"></div></section>
     <section id="dom-feed" class="cmc-panel"><div class="cmc-panel-title">Activity Feed</div><div class="cmc-panel-body"></div></section>
-    <section id="dom-quarter" class="cmc-panel"><div class="cmc-panel-title">Sector</div><div class="cmc-panel-body"></div></section>
+    <section id="dom-quarter" class="cmc-panel" aria-live="polite"><div class="cmc-panel-title">Sector</div><div class="cmc-panel-body"></div></section>
     <section id="dom-replay" class="cmc-panel"></section>
   </div>
 
   <section id="inspector-overlay" aria-hidden="true">
-    <div id="inspector-dialog" role="dialog" aria-modal="true" aria-labelledby="inspector-title">
+    <div id="inspector-dialog" role="dialog" aria-modal="true" aria-labelledby="inspector-title" tabindex="-1">
       <div class="inspector-header">
         <div>
           <h2 id="inspector-title" class="inspector-title">Inspector</h2>
@@ -978,8 +937,8 @@
         <button id="inspector-close" class="inspector-close" type="button" aria-label="Close inspector">×</button>
       </div>
       <div class="inspector-toolbar">
-        <button class="inspector-pill active" type="button" data-inspector-mode="tools">Tools</button>
-        <button class="inspector-pill" type="button" data-inspector-mode="turns">Turns</button>
+        <button class="inspector-pill active" type="button" data-inspector-mode="tools" aria-pressed="true">Tools</button>
+        <button class="inspector-pill" type="button" data-inspector-mode="turns" aria-pressed="false">Turns</button>
         <div id="inspector-tabs" class="inspector-tabs" aria-label="Tool filters"></div>
       </div>
       <div class="inspector-body">
