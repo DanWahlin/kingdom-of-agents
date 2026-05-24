@@ -48,9 +48,27 @@
     </div>
 
     <div class="container hero-grid">
-      <div class="hero-copy">
+      <div class="hero-heading">
         <div class="hero-kicker"><span class="kicker-dot"></span> Live Copilot CLI dashboard</div>
         <h1 class="hero-title">Watch your <span class="highlight">Copilot CLI</span><br/>come alive</h1>
+      </div>
+
+      <div class="hero-stage">
+        <div class="gif-showcase">
+          <div class="gif-frame">
+            <div class="gif-toolbar">
+              <div class="traffic-lights"><span></span><span></span><span></span></div>
+              <span class="gif-game-label" id="gif-label">Loading…</span>
+            </div>
+            <div class="gif-viewport">
+              <img id="gif-display" src="" alt="Dashboard preview" class="gif-img" />
+            </div>
+          </div>
+          <div class="gif-indicators" id="gif-indicators"></div>
+        </div>
+      </div>
+
+      <div class="hero-copy">
         <p class="hero-desc">Keep an eye on your Copilot CLI session without breaking focus. Every tool call, sub-agent dispatch, and permission prompt becomes a live signal on a second monitor — so you spot stalls, surprises, and "needs attention" the moment they happen, instead of scrolling back through terminal output.</p>
 
         <div class="hero-cta">
@@ -74,21 +92,6 @@
           <span class="badge">Phaser 4</span>
           <span class="badge">Rust + TypeScript</span>
           <span class="badge">Mac · Win · Linux</span>
-        </div>
-      </div>
-
-      <div class="hero-stage">
-        <div class="gif-showcase">
-          <div class="gif-frame">
-            <div class="gif-toolbar">
-              <div class="traffic-lights"><span></span><span></span><span></span></div>
-              <span class="gif-game-label" id="gif-label">Loading…</span>
-            </div>
-            <div class="gif-viewport">
-              <img id="gif-display" src="" alt="Dashboard preview" class="gif-img" />
-            </div>
-          </div>
-          <div class="gif-indicators" id="gif-indicators"></div>
         </div>
       </div>
     </div>
@@ -239,7 +242,6 @@
       <div class="story-card">
         <div class="story-text">
           <p><strong>Built with <a href="https://github.com/github/copilot-cli" target="_blank">GitHub Copilot CLI</a></strong>, which scaffolded the Tauri 2 + Phaser 4 + TypeScript shell and then iteratively designed the mission layout, the privacy-safe <code>AgentProvider</code> trait, and the replay timeline.</p>
-          <p>The architecture is deliberately provider-agnostic — <code>CopilotProvider</code> is the only implementation shipping today, but adding Claude Code, Codex, or other CLIs is a matter of dropping in another provider behind the same allowlisted boundary. Raw prompts, tool arguments, command output, file paths, and diffs <strong>never</strong> leave the Rust backend.</p>
         </div>
       </div>
     </div>

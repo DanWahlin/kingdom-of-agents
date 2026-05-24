@@ -345,6 +345,14 @@ code {
   z-index: 1;
 }
 
+/* Layout: heading spans both columns on top, then gifs on the left
+   and the supporting copy on the right beneath it. */
+.hero-grid .hero-heading { grid-column: 1 / -1; grid-row: 1; }
+.hero-grid .hero-stage   { grid-column: 1;     grid-row: 2; }
+.hero-grid .hero-copy    { grid-column: 2;     grid-row: 2; }
+
+.hero-heading { text-align: left; max-width: 900px; }
+
 .hero-copy { text-align: left; }
 
 .hero-kicker {
@@ -981,11 +989,16 @@ code {
     text-align: center;
   }
   .hero-copy { text-align: center; }
+  .hero-heading { text-align: center; max-width: none; }
   .hero-desc { margin-left: auto; margin-right: auto; }
   .hero-cta { justify-content: center; }
   .hero-badges { justify-content: center; }
   .built-with { margin: 0 auto 20px; }
-  .hero-stage { order: -1; }
+  /* Reset desktop column/row placement so the heading, stage, and copy
+     stack naturally in source order (heading → stage → copy). */
+  .hero-grid .hero-heading,
+  .hero-grid .hero-stage,
+  .hero-grid .hero-copy { grid-column: auto; grid-row: auto; }
   .gif-showcase { max-width: 440px; }
 }
 
