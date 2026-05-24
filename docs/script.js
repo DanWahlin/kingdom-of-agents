@@ -13,7 +13,7 @@
   const STAR_COUNT = 110;
   // Slightly warmer palette than a pure space site — leans into the
   // golden lantern / royal purple vibe of the mission theme.
-  const COLORS = ['#ffffff', '#c8c8ff', '#ffe8a8', '#a8d8ff', '#e0c8ff'];
+  const COLORS = ['#ffffff', '#cfe6ff', '#ffc070', '#5fd4ff', '#ffd8ad'];
 
   function resize() {
     canvas.width = window.innerWidth;
@@ -54,7 +54,7 @@
     ctx.globalAlpha = 1;
   }
 
-  // ---------- Floating particles (gold embers + purple sparks) ----------
+  // ---------- Floating particles (sunrise embers + aurora sparks) ----------
   const particleContainer = document.getElementById('particles');
   const PARTICLE_COUNT = 8;
 
@@ -62,13 +62,14 @@
     for (let i = 0; i < PARTICLE_COUNT; i++) {
       const el = document.createElement('div');
       const size = Math.random() * 3 + 1;
-      const isGold = Math.random() > 0.55;
+      const isSunrise = Math.random() > 0.5;
       el.style.cssText = `
         position: absolute;
         width: ${size}px;
         height: ${size}px;
         border-radius: 50%;
-        background: ${isGold ? 'rgba(255,198,41,0.4)' : 'rgba(155,109,255,0.35)'};
+        background: ${isSunrise ? 'rgba(255,138,60,0.45)' : 'rgba(95,212,255,0.40)'};
+        box-shadow: 0 0 ${size * 2}px ${isSunrise ? 'rgba(255,138,60,0.35)' : 'rgba(95,212,255,0.30)'};
         left: ${Math.random() * 100}%;
         top: ${Math.random() * 100}%;
         animation: particleFloat ${8 + Math.random() * 12}s ease-in-out infinite;

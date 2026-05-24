@@ -1,30 +1,51 @@
 /* ============================================================
    Copilot Mission Control — Landing page
-   Theme: Deep-night mission, CRT scanlines, royal gold + purple
-   Patterned after the Agent Arcade landing for visual consistency
-   across the projects, themed for the mission dashboard.
+   Theme: Cosmic-navy mission deck, sunrise horizon, aurora thrusters.
+   Palette is drawn from the hero banner art (copilot-mission-control.webp):
+     - deep navy (space)
+     - warm sunrise amber (planetary horizon)
+     - electric aurora cyan (spacecraft glow)
+     - soft starlight white
+   Sunrise amber + aurora cyan are the signature accents that set this
+   page apart from sister projects like Agent Arcade.
    ============================================================ */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg-deep:      #060814;
-  --bg-section:   #0a0e22;
-  --bg-card:      #0f1430;
-  --bg-card-alt:  #131938;
-  --gold:         #ffc629;
-  --gold-bright:  #ffd95c;
-  --gold-dark:    #c9930a;
-  --cyan:         #8ed0ff;
+  /* Deep cosmic navy backdrop (more saturated blue than a true black) */
+  --bg-deep:      #050a1c;
+  --bg-section:   #08102a;
+  --bg-card:      #0d1638;
+  --bg-card-alt:  #121d44;
+
+  /* Signature mission-control accents */
+  --sunrise:        #ff8a3c;   /* horizon glow — primary warm accent */
+  --sunrise-bright: #ffa75c;
+  --sunrise-deep:   #d65a14;
+  --aurora:         #5fd4ff;   /* thruster cyan — primary cool accent */
+  --aurora-bright:  #8fe6ff;
+  --aurora-deep:    #1f8fc9;
+
+  /* Supporting hues retained from the banner */
+  --gold:         #ffc870;     /* warmer than the prior pure gold */
+  --gold-bright:  #ffe09a;
+  --gold-dark:    #c98e2a;
+  --cyan:         var(--aurora);
   --teal:         #5be7c4;
-  --purple:       #9b6dff;
-  --magenta:      #ff7ad1;
-  --white:        #eef1ff;
-  --white-dim:    #b8c1e2;
-  --border:       rgba(255,255,255,0.08);
-  --glow-gold:    0 0 30px rgba(255,198,41,0.25);
-  --glow-purple:  0 0 20px rgba(155,109,255,0.22);
-  --glow-cyan:    0 0 20px rgba(142,208,255,0.22);
+  --purple:       #8a5dff;
+  --magenta:      #ff6dc4;
+
+  --white:        #eaf2ff;
+  --white-dim:    #b0bcde;
+  --border:       rgba(120,180,255,0.10);
+
+  --glow-sunrise: 0 0 30px rgba(255,138,60,0.28);
+  --glow-aurora:  0 0 24px rgba(95,212,255,0.30);
+  --glow-gold:    0 0 30px rgba(255,200,112,0.22);
+  --glow-purple:  0 0 20px rgba(138,93,255,0.22);
+  --glow-cyan:    var(--glow-aurora);
+
   --radius:       12px;
   --radius-lg:    20px;
   --font-display: 'Orbitron', sans-serif;
@@ -44,8 +65,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-a { color: var(--cyan); text-decoration: none; transition: color .2s; }
-a:hover { color: var(--gold-bright); }
+a { color: var(--aurora); text-decoration: none; transition: color .2s; }
+a:hover { color: var(--sunrise-bright); }
 
 img { max-width: 100%; height: auto; }
 
@@ -53,9 +74,9 @@ code {
   font-family: var(--font-mono);
   font-size: 0.85em;
   padding: 1px 6px;
-  background: rgba(255,255,255,0.06);
+  background: rgba(95,212,255,0.08);
   border-radius: 4px;
-  color: var(--teal);
+  color: var(--aurora-bright);
 }
 
 /* ---------- Scanlines (subtle CRT effect, fits pixel-art) ---------- */
@@ -80,9 +101,10 @@ code {
   top: 0; left: 0; right: 0;
   z-index: 100;
   padding: 0 24px;
-  background: rgba(6,8,20,0.85);
+  background: rgba(5,10,28,0.85);
   backdrop-filter: blur(12px);
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(120,180,255,0.10);
+  box-shadow: 0 1px 0 rgba(95,212,255,0.06), 0 6px 24px rgba(0,0,0,0.35);
   transition: background 0.3s ease;
 }
 
@@ -99,9 +121,10 @@ code {
   font-family: var(--font-display);
   font-size: 1rem;
   font-weight: 700;
-  color: var(--gold) !important;
+  color: var(--sunrise) !important;
   text-decoration: none;
   letter-spacing: 0.5px;
+  text-shadow: 0 0 12px rgba(255,138,60,0.35);
 }
 
 .navbar-links {
@@ -125,18 +148,18 @@ code {
   background: rgba(255,255,255,0.06);
 }
 
-.navbar-links li a.active { color: var(--gold); }
+.navbar-links li a.active { color: var(--sunrise); }
 
 .btn-nav {
   padding: 8px 20px !important;
   font-size: 0.78rem !important;
   margin-left: 8px;
-  color: #1a1000 !important;
+  color: #1a0a02 !important;
 }
 
 .btn-nav:hover {
-  color: #1a1000 !important;
-  background: linear-gradient(135deg, var(--gold), var(--gold-bright)) !important;
+  color: #1a0a02 !important;
+  background: linear-gradient(135deg, var(--sunrise-deep), var(--sunrise), var(--sunrise-bright)) !important;
 }
 
 .navbar-github {
@@ -186,7 +209,7 @@ code {
     left: 0;
     right: 0;
     flex-direction: column;
-    background: rgba(6,8,20,0.95);
+    background: rgba(5,10,28,0.95);
     backdrop-filter: blur(16px);
     border-bottom: 1px solid rgba(255,255,255,0.06);
     padding: 16px 24px;
@@ -233,29 +256,37 @@ code {
 
 .hero-glow {
   position: absolute;
-  width: 900px;
-  height: 900px;
+  width: 1100px;
+  height: 1100px;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: radial-gradient(circle, rgba(155,109,255,0.16) 0%, rgba(255,198,41,0.08) 40%, transparent 70%);
+  /* Stacked aurora: sunrise warmth at the horizon line, cyan thruster
+     bloom rising above it, with a deep navy halo blending into space.
+     Mirrors the layered atmosphere visible in the banner art. */
+  background:
+    radial-gradient(ellipse 60% 28% at 50% 78%, rgba(255,138,60,0.22) 0%, rgba(255,138,60,0.06) 35%, transparent 70%),
+    radial-gradient(ellipse 70% 60% at 50% 35%, rgba(95,212,255,0.16) 0%, rgba(138,93,255,0.08) 45%, transparent 75%),
+    radial-gradient(circle at 50% 50%, rgba(10,24,68,0.6) 0%, transparent 70%);
   pointer-events: none;
   z-index: 0;
 }
 
 /* Hero banner — wide art tile under the navbar, before the copy/stage grid.
    The wrap stretches to viewport edges with a soft top/bottom vignette so
-   the banner reads as part of the page surface, not a slab. */
+   the banner reads as part of the page surface, not a slab. A thin
+   sunrise→aurora horizon line under the banner echoes the planetary
+   horizon in the art itself. */
 .hero-banner-wrap {
   position: relative;
   width: 100vw;
   margin-bottom: 32px;
-  padding: 20px 0;
+  padding: 20px 0 28px;
   background: linear-gradient(180deg,
     transparent 0%,
-    rgba(10,6,24,0.35) 12%,
-    rgba(10,6,24,0.5) 50%,
-    rgba(10,6,24,0.35) 88%,
+    rgba(8,16,42,0.4) 12%,
+    rgba(8,16,42,0.55) 50%,
+    rgba(8,16,42,0.4) 88%,
     transparent 100%
   );
   display: flex;
@@ -264,12 +295,36 @@ code {
   z-index: 1;
 }
 
+/* Sunrise horizon line — a planetary atmosphere band that fades along
+   the bottom of the banner wrap. Distinctive accent that calls back to
+   the art and signals this isn't a generic landing page. */
+.hero-banner-wrap::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  width: min(900px, 90vw);
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(95,212,255,0.0) 8%,
+    rgba(95,212,255,0.55) 30%,
+    rgba(255,138,60,0.85) 50%,
+    rgba(95,212,255,0.55) 70%,
+    rgba(95,212,255,0.0) 92%,
+    transparent 100%
+  );
+  box-shadow: 0 0 14px rgba(255,138,60,0.35), 0 0 24px rgba(95,212,255,0.25);
+  pointer-events: none;
+}
+
 .hero-banner {
   width: 100%;
   max-width: 1200px;
   height: auto;
   display: block;
-  filter: drop-shadow(0 0 40px rgba(155,109,255,0.22)) drop-shadow(0 0 80px rgba(97,214,255,0.10));
+  filter: drop-shadow(0 0 40px rgba(95,212,255,0.22)) drop-shadow(0 0 90px rgba(255,138,60,0.12));
   -webkit-mask-image: radial-gradient(ellipse 62% 62% at 48% 48%, black 67%, transparent 84%);
   mask-image: radial-gradient(ellipse 62% 62% at 48% 48%, black 67%, transparent 84%);
 }
@@ -298,7 +353,7 @@ code {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 2px;
-  color: var(--cyan);
+  color: var(--aurora);
   margin-bottom: 16px;
 }
 
@@ -307,14 +362,14 @@ code {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--cyan);
+  background: var(--aurora);
   animation: kickerPulse 2s ease-in-out infinite;
-  box-shadow: 0 0 8px var(--cyan);
+  box-shadow: 0 0 8px var(--aurora);
 }
 
 @keyframes kickerPulse {
-  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--cyan); }
-  50% { opacity: 0.4; box-shadow: 0 0 2px var(--cyan); }
+  0%, 100% { opacity: 1; box-shadow: 0 0 8px var(--aurora); }
+  50% { opacity: 0.4; box-shadow: 0 0 2px var(--aurora); }
 }
 
 .hero-title {
@@ -327,7 +382,12 @@ code {
 }
 
 .highlight {
-  color: var(--gold);
+  /* Signature sunrise gradient — sets the brand apart from a flat-gold
+     treatment and ties the hero copy back to the banner's horizon hue. */
+  background: linear-gradient(120deg, var(--sunrise) 10%, var(--sunrise-bright) 50%, var(--aurora-bright) 95%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   font-weight: 800;
   white-space: nowrap;
 }
@@ -361,16 +421,16 @@ code {
   padding: 8px 20px;
   margin-bottom: 20px;
   border-radius: 50px;
-  background: rgba(155,109,255,0.08);
-  border: 1px solid rgba(255,198,41,0.15);
+  background: rgba(95,212,255,0.06);
+  border: 1px solid rgba(255,138,60,0.22);
   font-size: 0.85rem;
   font-weight: 500;
   color: var(--white-dim);
 }
 
 .built-with-icon { font-size: 1.1rem; }
-.built-with a { color: var(--gold); font-weight: 600; }
-.built-with a:hover { color: var(--gold-bright); }
+.built-with a { color: var(--sunrise); font-weight: 600; }
+.built-with a:hover { color: var(--sunrise-bright); }
 .built-with-separator { color: rgba(255,255,255,0.2); margin: 0 2px; }
 
 /* Buttons */
@@ -392,35 +452,35 @@ code {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--gold-dark), var(--gold), var(--gold-bright));
-  color: #1a1000;
-  box-shadow: var(--glow-gold);
+  background: linear-gradient(135deg, var(--sunrise-deep), var(--sunrise), var(--sunrise-bright));
+  color: #1a0a02;
+  box-shadow: var(--glow-sunrise);
 }
 
 .btn-primary:hover {
-  color: #1a1000;
+  color: #1a0a02;
   transform: translateY(-2px);
-  box-shadow: 0 0 40px rgba(255,198,41,0.4), 0 8px 30px rgba(0,0,0,0.4);
+  box-shadow: 0 0 40px rgba(255,138,60,0.45), 0 8px 30px rgba(0,0,0,0.4);
 }
 
 .btn-glow { animation: ctaGlow 3s ease-in-out infinite; }
 
 @keyframes ctaGlow {
-  0%, 100% { box-shadow: 0 0 20px rgba(255,198,41,0.25); }
-  50% { box-shadow: 0 0 40px rgba(255,198,41,0.5), 0 0 80px rgba(255,198,41,0.15); }
+  0%, 100% { box-shadow: 0 0 20px rgba(255,138,60,0.28); }
+  50% { box-shadow: 0 0 40px rgba(255,138,60,0.55), 0 0 80px rgba(95,212,255,0.20); }
 }
 
 .btn-secondary {
   background: transparent;
   color: var(--white);
-  border: 2px solid rgba(255,255,255,0.2);
+  border: 2px solid rgba(95,212,255,0.25);
   backdrop-filter: blur(8px);
 }
 
 .btn-secondary:hover {
-  border-color: var(--cyan);
-  color: var(--cyan);
-  box-shadow: var(--glow-cyan);
+  border-color: var(--aurora);
+  color: var(--aurora);
+  box-shadow: var(--glow-aurora);
   transform: translateY(-2px);
 }
 
@@ -432,8 +492,8 @@ code {
   font-size: 0.72rem;
   font-family: var(--font-mono);
   font-weight: 500;
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(95,212,255,0.05);
+  border: 1px solid rgba(95,212,255,0.16);
   color: var(--white-dim);
 }
 
@@ -455,11 +515,12 @@ code {
 .gif-frame {
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid rgba(255,255,255,0.1);
-  background: #0c1024;
+  border: 1px solid rgba(95,212,255,0.16);
+  background: #0a1230;
   box-shadow:
-    0 0 60px rgba(155,109,255,0.12),
-    0 20px 60px rgba(0,0,0,0.5);
+    0 0 60px rgba(95,212,255,0.16),
+    0 0 90px rgba(255,138,60,0.08),
+    0 20px 60px rgba(0,0,0,0.55);
 }
 
 .gif-toolbar {
@@ -485,14 +546,14 @@ code {
 .gif-game-label {
   font-family: var(--font-mono);
   font-size: 0.72rem;
-  color: var(--gold);
+  color: var(--sunrise);
   letter-spacing: 0.5px;
   transition: opacity 0.3s ease;
 }
 
 .gif-viewport {
   position: relative;
-  background: #060814;
+  background: #050a1c;
   aspect-ratio: 16 / 10;
   display: flex;
   align-items: center;
@@ -529,7 +590,7 @@ code {
   max-width: 90vw;
   max-height: 80vh;
   border-radius: 10px;
-  box-shadow: 0 0 40px rgba(255, 198, 41, 0.3);
+  box-shadow: 0 0 40px rgba(95,212,255,0.35), 0 0 80px rgba(255,138,60,0.18);
 }
 .lightbox-close {
   position: absolute;
@@ -568,17 +629,17 @@ code {
 }
 
 .gif-dot.active {
-  background: var(--gold);
-  border-color: var(--gold);
-  box-shadow: 0 0 8px rgba(255,198,41,0.5);
+  background: var(--sunrise);
+  border-color: var(--sunrise);
+  box-shadow: 0 0 8px rgba(255,138,60,0.6);
 }
 
 .gif-progress {
   height: 2px;
-  background: var(--gold);
+  background: linear-gradient(90deg, var(--sunrise), var(--aurora));
   width: 0%;
   transition: none;
-  box-shadow: 0 0 6px rgba(255,198,41,0.4);
+  box-shadow: 0 0 6px rgba(255,138,60,0.45);
 }
 
 /* ---------- Sections ---------- */
@@ -597,7 +658,9 @@ code {
   font-weight: 800;
   text-align: center;
   margin-bottom: 16px;
-  background: linear-gradient(135deg, var(--gold), var(--gold-bright));
+  /* Sunrise sweep — warm to cool, mirroring the planetary horizon in the
+     banner. Distinctive section-heading treatment vs a flat gold. */
+  background: linear-gradient(95deg, var(--sunrise) 0%, var(--sunrise-bright) 30%, var(--gold-bright) 55%, var(--aurora-bright) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -744,8 +807,8 @@ code {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: linear-gradient(to bottom, var(--purple), var(--cyan), var(--gold));
-  opacity: 0.3;
+  background: linear-gradient(to bottom, var(--aurora), var(--purple), var(--sunrise));
+  opacity: 0.45;
 }
 
 .step {
@@ -767,8 +830,9 @@ code {
   font-size: 1.1rem;
   font-weight: 800;
   background: var(--bg-card);
-  border: 2px solid rgba(155,109,255,0.3);
-  color: var(--gold);
+  border: 2px solid rgba(255,138,60,0.35);
+  color: var(--sunrise-bright);
+  box-shadow: inset 0 0 18px rgba(95,212,255,0.10);
   position: relative;
   z-index: 1;
 }
@@ -805,7 +869,7 @@ code {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--gold-dark), var(--gold), var(--cyan));
+  background: linear-gradient(90deg, var(--sunrise-deep), var(--sunrise), var(--gold-bright), var(--aurora));
 }
 
 .story-text p {
@@ -836,7 +900,8 @@ code {
 
 .credit-item:hover {
   transform: translateY(-4px);
-  border-color: rgba(155,109,255,0.3);
+  border-color: rgba(95,212,255,0.35);
+  box-shadow: 0 0 24px rgba(95,212,255,0.10), 0 0 40px rgba(255,138,60,0.06);
 }
 
 .credit-icon { font-size: 2rem; margin-bottom: 12px; }
@@ -845,7 +910,7 @@ code {
   font-family: var(--font-display);
   font-size: 0.85rem;
   margin-bottom: 8px;
-  color: var(--gold);
+  color: var(--sunrise);
 }
 
 .credit-item p {
@@ -859,7 +924,7 @@ code {
   position: relative;
   z-index: 1;
   padding: 60px 0 40px;
-  background: #050816;
+  background: #040818;
   border-top: 1px solid var(--border);
   text-align: center;
 }
@@ -868,7 +933,10 @@ code {
   font-family: var(--font-display);
   font-size: 1.4rem;
   font-weight: 800;
-  color: var(--gold);
+  background: linear-gradient(95deg, var(--sunrise), var(--sunrise-bright), var(--aurora-bright));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
   margin-bottom: 4px;
 }
 
@@ -891,7 +959,7 @@ code {
   transition: color 0.2s;
 }
 
-.footer-links a:hover { color: var(--cyan); }
+.footer-links a:hover { color: var(--sunrise-bright); }
 
 .footer-copy {
   color: rgba(255,255,255,0.3);
