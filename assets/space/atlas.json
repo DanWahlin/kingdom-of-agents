@@ -1,0 +1,1674 @@
+{
+  "frames": [
+    {
+      "filename": "planet_earth",
+      "frame": {
+        "x": 17,
+        "y": 31,
+        "w": 112,
+        "h": 112
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 112,
+        "h": 112
+      },
+      "sourceSize": {
+        "w": 112,
+        "h": 112
+      }
+    },
+    {
+      "filename": "planet_red",
+      "frame": {
+        "x": 149,
+        "y": 32,
+        "w": 106,
+        "h": 108
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 106,
+        "h": 108
+      },
+      "sourceSize": {
+        "w": 106,
+        "h": 108
+      }
+    },
+    {
+      "filename": "planet_purple",
+      "frame": {
+        "x": 287,
+        "y": 31,
+        "w": 107,
+        "h": 109
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 107,
+        "h": 109
+      },
+      "sourceSize": {
+        "w": 107,
+        "h": 109
+      }
+    },
+    {
+      "filename": "planet_ringed",
+      "frame": {
+        "x": 418,
+        "y": 33,
+        "w": 141,
+        "h": 111
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 141,
+        "h": 111
+      },
+      "sourceSize": {
+        "w": 141,
+        "h": 111
+      }
+    },
+    {
+      "filename": "planet_ice_blue",
+      "frame": {
+        "x": 594,
+        "y": 33,
+        "w": 109,
+        "h": 110
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 109,
+        "h": 110
+      },
+      "sourceSize": {
+        "w": 109,
+        "h": 110
+      }
+    },
+    {
+      "filename": "moon_gray",
+      "frame": {
+        "x": 730,
+        "y": 37,
+        "w": 96,
+        "h": 98
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 96,
+        "h": 98
+      },
+      "sourceSize": {
+        "w": 96,
+        "h": 98
+      }
+    },
+    {
+      "filename": "sun",
+      "frame": {
+        "x": 856,
+        "y": 30,
+        "w": 113,
+        "h": 114
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 113,
+        "h": 114
+      },
+      "sourceSize": {
+        "w": 113,
+        "h": 114
+      }
+    },
+    {
+      "filename": "ship_fighter",
+      "frame": {
+        "x": 1005,
+        "y": 32,
+        "w": 132,
+        "h": 103
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 132,
+        "h": 103
+      },
+      "sourceSize": {
+        "w": 132,
+        "h": 103
+      }
+    },
+    {
+      "filename": "ship_cargo",
+      "frame": {
+        "x": 1165,
+        "y": 30,
+        "w": 160,
+        "h": 104
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 160,
+        "h": 104
+      },
+      "sourceSize": {
+        "w": 160,
+        "h": 104
+      }
+    },
+    {
+      "filename": "satellite",
+      "frame": {
+        "x": 1369,
+        "y": 27,
+        "w": 136,
+        "h": 118
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 118
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 118
+      }
+    },
+    {
+      "filename": "asteroid_gray",
+      "frame": {
+        "x": 17,
+        "y": 177,
+        "w": 112,
+        "h": 91
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 112,
+        "h": 91
+      },
+      "sourceSize": {
+        "w": 112,
+        "h": 91
+      }
+    },
+    {
+      "filename": "asteroid_brown",
+      "frame": {
+        "x": 149,
+        "y": 176,
+        "w": 108,
+        "h": 92
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 108,
+        "h": 92
+      },
+      "sourceSize": {
+        "w": 108,
+        "h": 92
+      }
+    },
+    {
+      "filename": "crystal_asteroid_purple",
+      "frame": {
+        "x": 291,
+        "y": 174,
+        "w": 105,
+        "h": 97
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 105,
+        "h": 97
+      },
+      "sourceSize": {
+        "w": 105,
+        "h": 97
+      }
+    },
+    {
+      "filename": "ice_asteroid_blue",
+      "frame": {
+        "x": 443,
+        "y": 175,
+        "w": 99,
+        "h": 96
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 99,
+        "h": 96
+      },
+      "sourceSize": {
+        "w": 99,
+        "h": 96
+      }
+    },
+    {
+      "filename": "ore_asteroid_gold",
+      "frame": {
+        "x": 594,
+        "y": 179,
+        "w": 95,
+        "h": 87
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 95,
+        "h": 87
+      },
+      "sourceSize": {
+        "w": 95,
+        "h": 87
+      }
+    },
+    {
+      "filename": "meteor_fire",
+      "frame": {
+        "x": 704,
+        "y": 164,
+        "w": 129,
+        "h": 115
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 129,
+        "h": 115
+      },
+      "sourceSize": {
+        "w": 129,
+        "h": 115
+      }
+    },
+    {
+      "filename": "space_station",
+      "frame": {
+        "x": 846,
+        "y": 169,
+        "w": 151,
+        "h": 116
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 151,
+        "h": 116
+      },
+      "sourceSize": {
+        "w": 151,
+        "h": 116
+      }
+    },
+    {
+      "filename": "facility_tower",
+      "frame": {
+        "x": 1061,
+        "y": 166,
+        "w": 94,
+        "h": 120
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 94,
+        "h": 120
+      },
+      "sourceSize": {
+        "w": 94,
+        "h": 120
+      }
+    },
+    {
+      "filename": "moon_base",
+      "frame": {
+        "x": 1192,
+        "y": 167,
+        "w": 120,
+        "h": 122
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 120,
+        "h": 122
+      },
+      "sourceSize": {
+        "w": 120,
+        "h": 122
+      }
+    },
+    {
+      "filename": "satellite_dish",
+      "frame": {
+        "x": 1348,
+        "y": 162,
+        "w": 127,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 127,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 127,
+        "h": 128
+      }
+    },
+    {
+      "filename": "solar_system_panel",
+      "frame": {
+        "x": 18,
+        "y": 319,
+        "w": 271,
+        "h": 139
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 271,
+        "h": 139
+      },
+      "sourceSize": {
+        "w": 271,
+        "h": 139
+      }
+    },
+    {
+      "filename": "world_map_panel",
+      "frame": {
+        "x": 306,
+        "y": 320,
+        "w": 230,
+        "h": 137
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 230,
+        "h": 137
+      },
+      "sourceSize": {
+        "w": 230,
+        "h": 137
+      }
+    },
+    {
+      "filename": "radar_panel",
+      "frame": {
+        "x": 554,
+        "y": 319,
+        "w": 202,
+        "h": 138
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 202,
+        "h": 138
+      },
+      "sourceSize": {
+        "w": 202,
+        "h": 138
+      }
+    },
+    {
+      "filename": "captain_chair_dark",
+      "frame": {
+        "x": 777,
+        "y": 321,
+        "w": 82,
+        "h": 134
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 82,
+        "h": 134
+      },
+      "sourceSize": {
+        "w": 82,
+        "h": 134
+      }
+    },
+    {
+      "filename": "captain_chair_white",
+      "frame": {
+        "x": 895,
+        "y": 320,
+        "w": 85,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 85,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 85,
+        "h": 136
+      }
+    },
+    {
+      "filename": "tablet_console",
+      "frame": {
+        "x": 1041,
+        "y": 323,
+        "w": 85,
+        "h": 131
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 85,
+        "h": 131
+      },
+      "sourceSize": {
+        "w": 85,
+        "h": 131
+      }
+    },
+    {
+      "filename": "control_console",
+      "frame": {
+        "x": 1164,
+        "y": 323,
+        "w": 133,
+        "h": 119
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 133,
+        "h": 119
+      },
+      "sourceSize": {
+        "w": 133,
+        "h": 119
+      }
+    },
+    {
+      "filename": "starfield_monitor",
+      "frame": {
+        "x": 1332,
+        "y": 326,
+        "w": 117,
+        "h": 128
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 117,
+        "h": 128
+      },
+      "sourceSize": {
+        "w": 117,
+        "h": 128
+      }
+    },
+    {
+      "filename": "mission_progress_gauge",
+      "frame": {
+        "x": 21,
+        "y": 487,
+        "w": 108,
+        "h": 119
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 108,
+        "h": 119
+      },
+      "sourceSize": {
+        "w": 108,
+        "h": 119
+      }
+    },
+    {
+      "filename": "performance_chart_panel",
+      "frame": {
+        "x": 150,
+        "y": 484,
+        "w": 165,
+        "h": 126
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 165,
+        "h": 126
+      },
+      "sourceSize": {
+        "w": 165,
+        "h": 126
+      }
+    },
+    {
+      "filename": "systems_status_panel",
+      "frame": {
+        "x": 337,
+        "y": 484,
+        "w": 167,
+        "h": 126
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 167,
+        "h": 126
+      },
+      "sourceSize": {
+        "w": 167,
+        "h": 126
+      }
+    },
+    {
+      "filename": "alert_panel",
+      "frame": {
+        "x": 522,
+        "y": 480,
+        "w": 150,
+        "h": 127
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 150,
+        "h": 127
+      },
+      "sourceSize": {
+        "w": 150,
+        "h": 127
+      }
+    },
+    {
+      "filename": "power_gauge",
+      "frame": {
+        "x": 704,
+        "y": 489,
+        "w": 99,
+        "h": 119
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 99,
+        "h": 119
+      },
+      "sourceSize": {
+        "w": 99,
+        "h": 119
+      }
+    },
+    {
+      "filename": "daily_ops_icon",
+      "frame": {
+        "x": 845,
+        "y": 494,
+        "w": 89,
+        "h": 89
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 89,
+        "h": 89
+      },
+      "sourceSize": {
+        "w": 89,
+        "h": 89
+      }
+    },
+    {
+      "filename": "achievements_icon",
+      "frame": {
+        "x": 983,
+        "y": 494,
+        "w": 90,
+        "h": 90
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 90,
+        "h": 90
+      },
+      "sourceSize": {
+        "w": 90,
+        "h": 90
+      }
+    },
+    {
+      "filename": "analytics_icon",
+      "frame": {
+        "x": 1121,
+        "y": 494,
+        "w": 90,
+        "h": 90
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 90,
+        "h": 90
+      },
+      "sourceSize": {
+        "w": 90,
+        "h": 90
+      }
+    },
+    {
+      "filename": "crew_icon",
+      "frame": {
+        "x": 1260,
+        "y": 494,
+        "w": 90,
+        "h": 90
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 90,
+        "h": 90
+      },
+      "sourceSize": {
+        "w": 90,
+        "h": 90
+      }
+    },
+    {
+      "filename": "settings_icon",
+      "frame": {
+        "x": 1398,
+        "y": 494,
+        "w": 90,
+        "h": 90
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 90,
+        "h": 90
+      },
+      "sourceSize": {
+        "w": 90,
+        "h": 90
+      }
+    },
+    {
+      "filename": "button_launch",
+      "frame": {
+        "x": 20,
+        "y": 631,
+        "w": 136,
+        "h": 37
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 37
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 37
+      }
+    },
+    {
+      "filename": "button_deploy",
+      "frame": {
+        "x": 20,
+        "y": 675,
+        "w": 136,
+        "h": 37
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 37
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 37
+      }
+    },
+    {
+      "filename": "button_upgrade",
+      "frame": {
+        "x": 20,
+        "y": 718,
+        "w": 136,
+        "h": 37
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 136,
+        "h": 37
+      },
+      "sourceSize": {
+        "w": 136,
+        "h": 37
+      }
+    },
+    {
+      "filename": "button_back",
+      "frame": {
+        "x": 180,
+        "y": 632,
+        "w": 128,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 34
+      }
+    },
+    {
+      "filename": "button_cancel",
+      "frame": {
+        "x": 180,
+        "y": 675,
+        "w": 128,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 34
+      }
+    },
+    {
+      "filename": "button_confirm",
+      "frame": {
+        "x": 180,
+        "y": 718,
+        "w": 128,
+        "h": 34
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 128,
+        "h": 34
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 34
+      }
+    },
+    {
+      "filename": "mission_timeline_panel",
+      "frame": {
+        "x": 334,
+        "y": 638,
+        "w": 275,
+        "h": 85
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 275,
+        "h": 85
+      },
+      "sourceSize": {
+        "w": 275,
+        "h": 85
+      }
+    },
+    {
+      "filename": "sector_coordinates_panel",
+      "frame": {
+        "x": 637,
+        "y": 634,
+        "w": 166,
+        "h": 78
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 166,
+        "h": 78
+      },
+      "sourceSize": {
+        "w": 166,
+        "h": 78
+      }
+    },
+    {
+      "filename": "beacon_blue",
+      "frame": {
+        "x": 852,
+        "y": 635,
+        "w": 47,
+        "h": 89
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 47,
+        "h": 89
+      },
+      "sourceSize": {
+        "w": 47,
+        "h": 89
+      }
+    },
+    {
+      "filename": "beacon_green",
+      "frame": {
+        "x": 920,
+        "y": 635,
+        "w": 47,
+        "h": 89
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 47,
+        "h": 89
+      },
+      "sourceSize": {
+        "w": 47,
+        "h": 89
+      }
+    },
+    {
+      "filename": "beacon_yellow",
+      "frame": {
+        "x": 989,
+        "y": 635,
+        "w": 47,
+        "h": 89
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 47,
+        "h": 89
+      },
+      "sourceSize": {
+        "w": 47,
+        "h": 89
+      }
+    },
+    {
+      "filename": "beacon_red",
+      "frame": {
+        "x": 1058,
+        "y": 635,
+        "w": 47,
+        "h": 89
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 47,
+        "h": 89
+      },
+      "sourceSize": {
+        "w": 47,
+        "h": 89
+      }
+    },
+    {
+      "filename": "flag_blue",
+      "frame": {
+        "x": 1145,
+        "y": 627,
+        "w": 75,
+        "h": 111
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 75,
+        "h": 111
+      },
+      "sourceSize": {
+        "w": 75,
+        "h": 111
+      }
+    },
+    {
+      "filename": "flag_purple",
+      "frame": {
+        "x": 1225,
+        "y": 628,
+        "w": 74,
+        "h": 111
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 74,
+        "h": 111
+      },
+      "sourceSize": {
+        "w": 74,
+        "h": 111
+      }
+    },
+    {
+      "filename": "flag_orange",
+      "frame": {
+        "x": 1304,
+        "y": 628,
+        "w": 75,
+        "h": 111
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 75,
+        "h": 111
+      },
+      "sourceSize": {
+        "w": 75,
+        "h": 111
+      }
+    },
+    {
+      "filename": "flag_green",
+      "frame": {
+        "x": 1387,
+        "y": 628,
+        "w": 75,
+        "h": 111
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 75,
+        "h": 111
+      },
+      "sourceSize": {
+        "w": 75,
+        "h": 111
+      }
+    },
+    {
+      "filename": "crate_gray",
+      "frame": {
+        "x": 20,
+        "y": 778,
+        "w": 137,
+        "h": 80
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 137,
+        "h": 80
+      },
+      "sourceSize": {
+        "w": 137,
+        "h": 80
+      }
+    },
+    {
+      "filename": "crate_blue",
+      "frame": {
+        "x": 166,
+        "y": 777,
+        "w": 137,
+        "h": 82
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 137,
+        "h": 82
+      },
+      "sourceSize": {
+        "w": 137,
+        "h": 82
+      }
+    },
+    {
+      "filename": "crate_purple",
+      "frame": {
+        "x": 313,
+        "y": 777,
+        "w": 137,
+        "h": 82
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 137,
+        "h": 82
+      },
+      "sourceSize": {
+        "w": 137,
+        "h": 82
+      }
+    },
+    {
+      "filename": "crate_yellow",
+      "frame": {
+        "x": 461,
+        "y": 776,
+        "w": 137,
+        "h": 83
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 137,
+        "h": 83
+      },
+      "sourceSize": {
+        "w": 137,
+        "h": 83
+      }
+    },
+    {
+      "filename": "crate_red",
+      "frame": {
+        "x": 609,
+        "y": 775,
+        "w": 137,
+        "h": 84
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 137,
+        "h": 84
+      },
+      "sourceSize": {
+        "w": 137,
+        "h": 84
+      }
+    },
+    {
+      "filename": "crystal_blue",
+      "frame": {
+        "x": 775,
+        "y": 761,
+        "w": 75,
+        "h": 97
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 75,
+        "h": 97
+      },
+      "sourceSize": {
+        "w": 75,
+        "h": 97
+      }
+    },
+    {
+      "filename": "crystal_purple",
+      "frame": {
+        "x": 884,
+        "y": 767,
+        "w": 78,
+        "h": 91
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 78,
+        "h": 91
+      },
+      "sourceSize": {
+        "w": 78,
+        "h": 91
+      }
+    },
+    {
+      "filename": "crystal_orange",
+      "frame": {
+        "x": 1001,
+        "y": 765,
+        "w": 76,
+        "h": 94
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 76,
+        "h": 94
+      },
+      "sourceSize": {
+        "w": 76,
+        "h": 94
+      }
+    },
+    {
+      "filename": "crystal_green",
+      "frame": {
+        "x": 1115,
+        "y": 768,
+        "w": 76,
+        "h": 91
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 76,
+        "h": 91
+      },
+      "sourceSize": {
+        "w": 76,
+        "h": 91
+      }
+    },
+    {
+      "filename": "energy_cell",
+      "frame": {
+        "x": 1225,
+        "y": 765,
+        "w": 52,
+        "h": 92
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 52,
+        "h": 92
+      },
+      "sourceSize": {
+        "w": 52,
+        "h": 92
+      }
+    },
+    {
+      "filename": "power_cube",
+      "frame": {
+        "x": 1311,
+        "y": 775,
+        "w": 65,
+        "h": 73
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 65,
+        "h": 73
+      },
+      "sourceSize": {
+        "w": 65,
+        "h": 73
+      }
+    },
+    {
+      "filename": "round_device",
+      "frame": {
+        "x": 1408,
+        "y": 772,
+        "w": 63,
+        "h": 75
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 63,
+        "h": 75
+      },
+      "sourceSize": {
+        "w": 63,
+        "h": 75
+      }
+    },
+    {
+      "filename": "thruster_device",
+      "frame": {
+        "x": 1480,
+        "y": 775,
+        "w": 56,
+        "h": 77
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 56,
+        "h": 77
+      },
+      "sourceSize": {
+        "w": 56,
+        "h": 77
+      }
+    },
+    {
+      "filename": "explosion_fire",
+      "frame": {
+        "x": 17,
+        "y": 884,
+        "w": 109,
+        "h": 107
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 109,
+        "h": 107
+      },
+      "sourceSize": {
+        "w": 109,
+        "h": 107
+      }
+    },
+    {
+      "filename": "starburst_blue",
+      "frame": {
+        "x": 157,
+        "y": 903,
+        "w": 79,
+        "h": 79
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 79,
+        "h": 79
+      },
+      "sourceSize": {
+        "w": 79,
+        "h": 79
+      }
+    },
+    {
+      "filename": "wormhole_purple",
+      "frame": {
+        "x": 284,
+        "y": 886,
+        "w": 139,
+        "h": 112
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 139,
+        "h": 112
+      },
+      "sourceSize": {
+        "w": 139,
+        "h": 112
+      }
+    },
+    {
+      "filename": "radar_green",
+      "frame": {
+        "x": 427,
+        "y": 887,
+        "w": 113,
+        "h": 111
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 113,
+        "h": 111
+      },
+      "sourceSize": {
+        "w": 113,
+        "h": 111
+      }
+    },
+    {
+      "filename": "teleporter_beam",
+      "frame": {
+        "x": 558,
+        "y": 884,
+        "w": 107,
+        "h": 113
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 107,
+        "h": 113
+      },
+      "sourceSize": {
+        "w": 107,
+        "h": 113
+      }
+    },
+    {
+      "filename": "arrows_blue",
+      "frame": {
+        "x": 669,
+        "y": 918,
+        "w": 73,
+        "h": 49
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 73,
+        "h": 49
+      },
+      "sourceSize": {
+        "w": 73,
+        "h": 49
+      }
+    },
+    {
+      "filename": "arrows_green",
+      "frame": {
+        "x": 767,
+        "y": 918,
+        "w": 57,
+        "h": 49
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 57,
+        "h": 49
+      },
+      "sourceSize": {
+        "w": 57,
+        "h": 49
+      }
+    },
+    {
+      "filename": "arrows_yellow",
+      "frame": {
+        "x": 854,
+        "y": 918,
+        "w": 55,
+        "h": 49
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 55,
+        "h": 49
+      },
+      "sourceSize": {
+        "w": 55,
+        "h": 49
+      }
+    },
+    {
+      "filename": "arrows_red",
+      "frame": {
+        "x": 936,
+        "y": 918,
+        "w": 52,
+        "h": 49
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 52,
+        "h": 49
+      },
+      "sourceSize": {
+        "w": 52,
+        "h": 49
+      }
+    },
+    {
+      "filename": "empty_panel_dark",
+      "frame": {
+        "x": 1046,
+        "y": 891,
+        "w": 123,
+        "h": 99
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 123,
+        "h": 99
+      },
+      "sourceSize": {
+        "w": 123,
+        "h": 99
+      }
+    },
+    {
+      "filename": "empty_panel_blue",
+      "frame": {
+        "x": 1194,
+        "y": 891,
+        "w": 126,
+        "h": 99
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 126,
+        "h": 99
+      },
+      "sourceSize": {
+        "w": 126,
+        "h": 99
+      }
+    },
+    {
+      "filename": "selection_brackets",
+      "frame": {
+        "x": 1364,
+        "y": 891,
+        "w": 137,
+        "h": 100
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 137,
+        "h": 100
+      },
+      "sourceSize": {
+        "w": 137,
+        "h": 100
+      }
+    }
+  ],
+  "meta": {
+    "image": "atlas.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 1536,
+      "h": 1024
+    },
+    "scale": "1",
+    "app": "copilot-mission-control",
+    "version": "1.0"
+  }
+}

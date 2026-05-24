@@ -172,7 +172,8 @@ declare global {
 }
 
 const GOLD = 0xffd54a;
-const TS_ASSET_ROOT = '../assets/kingdom/tiny-swords';
+const SPACE_ATLAS_KEY = 'mc';
+const SPACE_ATLAS_ROOT = '../assets/space';
 
 type ThemeMode = 'dark' | 'light';
 interface MissionTheme {
@@ -236,15 +237,16 @@ function loadInitialThemeMode(): ThemeMode {
 
 setActiveTheme(loadInitialThemeMode());
 const QUARTER_TEXTURES: Record<string, string> = {
-  forge: 'ts-house-red',
-  library: 'ts-tower-blue',
-  terminal: 'ts-tower-purple',
-  signal: 'ts-tower-yellow',
-  delegates: 'ts-castle-red',
-  skills: 'ts-house-purple',
-  court: 'ts-castle-yellow',
-  mcp: 'ts-house-blue',
+  forge: 'facility_tower',
+  library: 'moon_base',
+  terminal: 'control_console',
+  signal: 'satellite_dish',
+  delegates: 'ship_cargo',
+  skills: 'tablet_console',
+  court: 'captain_chair_white',
+  mcp: 'satellite',
 };
+const CENTER_TEXTURE = 'space_station';
 
 /// Single source of truth for quarter hues. Both `buildQuarters` and
 /// `categoryColor` read from this map — previously they each had their
@@ -449,16 +451,14 @@ export class MissionControlScene extends Phaser.Scene {
   }
 
   preload() {
-    this.load.image('ts-castle-blue', `${TS_ASSET_ROOT}/buildings/castle-blue.png`);
-    this.load.image('ts-castle-red', `${TS_ASSET_ROOT}/buildings/castle-red.png`);
-    this.load.image('ts-castle-yellow', `${TS_ASSET_ROOT}/buildings/castle-yellow.png`);
-    this.load.image('ts-house-blue', `${TS_ASSET_ROOT}/buildings/house-blue.png`);
-    this.load.image('ts-house-purple', `${TS_ASSET_ROOT}/buildings/house-purple.png`);
-    this.load.image('ts-house-red', `${TS_ASSET_ROOT}/buildings/house-red.png`);
-    this.load.image('ts-house-yellow', `${TS_ASSET_ROOT}/buildings/house-yellow.png`);
-    this.load.image('ts-tower-blue', `${TS_ASSET_ROOT}/buildings/tower-blue.png`);
-    this.load.image('ts-tower-purple', `${TS_ASSET_ROOT}/buildings/tower-purple.png`);
-    this.load.image('ts-tower-yellow', `${TS_ASSET_ROOT}/buildings/tower-yellow.png`);
+    // Single atlas load. assets/space/atlas.png is a transparent-bg
+    // 1536x1024 sheet with 79 frames; atlas.json maps frame names →
+    // pixel rects. Phaser auto-detects the JSONArray format.
+    this.load.atlas(
+      SPACE_ATLAS_KEY,
+      `${SPACE_ATLAS_ROOT}/atlas.png`,
+      `${SPACE_ATLAS_ROOT}/atlas.json`,
+    );
   }
 
   create() {
@@ -1194,14 +1194,17 @@ export class MissionControlScene extends Phaser.Scene {
       this.map.fillCircle(quarter.x, quarter.y - 8 * pedestalUnit, 54 * pedestalUnit);
       this.map.fillStyle(pedestalColor, innerAlpha);
       this.map.fillCircle(quarter.x, quarter.y - 18 * pedestalUnit, 30 * pedestalUnit);
-      const texture = QUARTER_TEXTURES[quarter.key] ?? 'ts-house-blue';
-      const spriteW = size * 0.52;
-      const spriteH = size * 0.74;
-      const sprite = this.add.image(quarter.x, panelTop + size * 0.36, texture)
+      const texture = QUARTER_TEXTURES[quarter.key] ?? CENTER_TEXTURE;
+      // Constrain the sprite inside a square box (max W = max H = size * 0.74)
+      // and scale uniformly so wide consoles, tall towers, and square dishes
+      // all read at the same visual weight without distortion.
+      const spriteBox = size * 0.74;
+      const fit = this.fitSpriteToBox(texture, spriteBox, spriteBox);
+      const sprite = this.add.image(quarter.x, panelTop + size * 0.36, SPACE_ATLAS_KEY, texture)
         .setOrigin(0.5, 0.62)
         .setDepth(7)
         .setAlpha(focused ? 1 : 0.9);
-      sprite.setDisplaySize(spriteW, spriteH);
+      sprite.setDisplaySize(fit.w, fit.h);
       this.textObjects.push(sprite);
       const labelSize = Math.max(10, Math.round(size * 0.1));
       const countSize = Math.max(13, Math.round(size * 0.13));
@@ -1324,10 +1327,14 @@ export class MissionControlScene extends Phaser.Scene {
       active: active > 0,
     };
 
-    const castle = this.add.image(x, y - 10 * castleScale, 'ts-castle-blue')
+    // Native space_station frame is 151x116; old castle was sized at 210x168.
+    // Preserve native aspect by fitting the sprite inside the legacy castle
+    // bounding box, so the visual mass stays similar after the swap.
+    const castleFit = this.fitSpriteToBox(CENTER_TEXTURE, 210 * castleScale, 168 * castleScale);
+    const castle = this.add.image(x, y - 10 * castleScale, SPACE_ATLAS_KEY, CENTER_TEXTURE)
       .setOrigin(0.5, 0.62)
       .setDepth(6);
-    castle.setDisplaySize(210 * castleScale, 168 * castleScale);
+    castle.setDisplaySize(castleFit.w, castleFit.h);
     this.textObjects.push(castle);
     // Active-sessions badge — sits in the moat just below the castle.
     // With sprite anchor at y - 10s, sprite bottom = y + 54*castleScale.
@@ -2215,6 +2222,22 @@ export class MissionControlScene extends Phaser.Scene {
     }).setDepth(20);
     this.textObjects.push(obj);
     return obj;
+  }
+
+  /// Scale a frame uniformly so it fits inside (maxW, maxH) without
+  /// distortion. The space atlas mixes wide consoles (133x119), tall
+  /// chairs (85x136), and near-square dishes (127x128) — calling
+  /// setDisplaySize(w, h) with fixed numbers would squash them. Reads
+  /// the native frame size from the texture cache; falls back to the
+  /// box itself if the frame isn't loaded yet (shouldn't happen post-
+  /// preload but keeps us safe).
+  private fitSpriteToBox(frameName: string, maxW: number, maxH: number) {
+    const tex = this.textures.get(SPACE_ATLAS_KEY);
+    const frame = tex ? tex.get(frameName) : null;
+    const nativeW = frame?.width || maxW;
+    const nativeH = frame?.height || maxH;
+    const scale = Math.min(maxW / nativeW, maxH / nativeH);
+    return { w: nativeW * scale, h: nativeH * scale };
   }
 
   private addWrappedText(x: number, y: number, text: string, width: number, size: number, color: string) {

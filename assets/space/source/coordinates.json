@@ -1,0 +1,561 @@
+{
+  "image": "49e455a8-c183-4268-85bc-55957f3db77d.png",
+  "imageWidth": 1536,
+  "imageHeight": 1024,
+  "coordinateSystem": "top-left origin, pixels",
+  "sprites": [
+    {
+      "name": "planet_earth",
+      "x": 17,
+      "y": 31,
+      "w": 112,
+      "h": 112
+    },
+    {
+      "name": "planet_red",
+      "x": 149,
+      "y": 32,
+      "w": 106,
+      "h": 108
+    },
+    {
+      "name": "planet_purple",
+      "x": 287,
+      "y": 31,
+      "w": 107,
+      "h": 109
+    },
+    {
+      "name": "planet_ringed",
+      "x": 418,
+      "y": 33,
+      "w": 141,
+      "h": 111
+    },
+    {
+      "name": "planet_ice_blue",
+      "x": 594,
+      "y": 33,
+      "w": 109,
+      "h": 110
+    },
+    {
+      "name": "moon_gray",
+      "x": 730,
+      "y": 37,
+      "w": 96,
+      "h": 98
+    },
+    {
+      "name": "sun",
+      "x": 856,
+      "y": 30,
+      "w": 113,
+      "h": 114
+    },
+    {
+      "name": "ship_fighter",
+      "x": 1005,
+      "y": 32,
+      "w": 132,
+      "h": 103
+    },
+    {
+      "name": "ship_cargo",
+      "x": 1165,
+      "y": 30,
+      "w": 160,
+      "h": 104
+    },
+    {
+      "name": "satellite",
+      "x": 1369,
+      "y": 27,
+      "w": 136,
+      "h": 118
+    },
+    {
+      "name": "asteroid_gray",
+      "x": 17,
+      "y": 177,
+      "w": 112,
+      "h": 91
+    },
+    {
+      "name": "asteroid_brown",
+      "x": 149,
+      "y": 176,
+      "w": 108,
+      "h": 92
+    },
+    {
+      "name": "crystal_asteroid_purple",
+      "x": 291,
+      "y": 174,
+      "w": 105,
+      "h": 97
+    },
+    {
+      "name": "ice_asteroid_blue",
+      "x": 443,
+      "y": 175,
+      "w": 99,
+      "h": 96
+    },
+    {
+      "name": "ore_asteroid_gold",
+      "x": 594,
+      "y": 179,
+      "w": 95,
+      "h": 87
+    },
+    {
+      "name": "meteor_fire",
+      "x": 704,
+      "y": 164,
+      "w": 129,
+      "h": 115
+    },
+    {
+      "name": "space_station",
+      "x": 846,
+      "y": 169,
+      "w": 151,
+      "h": 116
+    },
+    {
+      "name": "facility_tower",
+      "x": 1061,
+      "y": 166,
+      "w": 94,
+      "h": 120
+    },
+    {
+      "name": "moon_base",
+      "x": 1192,
+      "y": 167,
+      "w": 120,
+      "h": 122
+    },
+    {
+      "name": "satellite_dish",
+      "x": 1348,
+      "y": 162,
+      "w": 127,
+      "h": 128
+    },
+    {
+      "name": "solar_system_panel",
+      "x": 18,
+      "y": 319,
+      "w": 271,
+      "h": 139
+    },
+    {
+      "name": "world_map_panel",
+      "x": 306,
+      "y": 320,
+      "w": 230,
+      "h": 137
+    },
+    {
+      "name": "radar_panel",
+      "x": 554,
+      "y": 319,
+      "w": 202,
+      "h": 138
+    },
+    {
+      "name": "captain_chair_dark",
+      "x": 777,
+      "y": 321,
+      "w": 82,
+      "h": 134
+    },
+    {
+      "name": "captain_chair_white",
+      "x": 895,
+      "y": 320,
+      "w": 85,
+      "h": 136
+    },
+    {
+      "name": "tablet_console",
+      "x": 1041,
+      "y": 323,
+      "w": 85,
+      "h": 131
+    },
+    {
+      "name": "control_console",
+      "x": 1164,
+      "y": 323,
+      "w": 133,
+      "h": 119
+    },
+    {
+      "name": "starfield_monitor",
+      "x": 1332,
+      "y": 326,
+      "w": 117,
+      "h": 128
+    },
+    {
+      "name": "mission_progress_gauge",
+      "x": 21,
+      "y": 487,
+      "w": 108,
+      "h": 119
+    },
+    {
+      "name": "performance_chart_panel",
+      "x": 150,
+      "y": 484,
+      "w": 165,
+      "h": 126
+    },
+    {
+      "name": "systems_status_panel",
+      "x": 337,
+      "y": 484,
+      "w": 167,
+      "h": 126
+    },
+    {
+      "name": "alert_panel",
+      "x": 522,
+      "y": 480,
+      "w": 150,
+      "h": 127
+    },
+    {
+      "name": "power_gauge",
+      "x": 704,
+      "y": 489,
+      "w": 99,
+      "h": 119
+    },
+    {
+      "name": "daily_ops_icon",
+      "x": 845,
+      "y": 494,
+      "w": 89,
+      "h": 89
+    },
+    {
+      "name": "achievements_icon",
+      "x": 983,
+      "y": 494,
+      "w": 90,
+      "h": 90
+    },
+    {
+      "name": "analytics_icon",
+      "x": 1121,
+      "y": 494,
+      "w": 90,
+      "h": 90
+    },
+    {
+      "name": "crew_icon",
+      "x": 1260,
+      "y": 494,
+      "w": 90,
+      "h": 90
+    },
+    {
+      "name": "settings_icon",
+      "x": 1398,
+      "y": 494,
+      "w": 90,
+      "h": 90
+    },
+    {
+      "name": "button_launch",
+      "x": 20,
+      "y": 631,
+      "w": 136,
+      "h": 37
+    },
+    {
+      "name": "button_deploy",
+      "x": 20,
+      "y": 675,
+      "w": 136,
+      "h": 37
+    },
+    {
+      "name": "button_upgrade",
+      "x": 20,
+      "y": 718,
+      "w": 136,
+      "h": 37
+    },
+    {
+      "name": "button_back",
+      "x": 180,
+      "y": 632,
+      "w": 128,
+      "h": 34
+    },
+    {
+      "name": "button_cancel",
+      "x": 180,
+      "y": 675,
+      "w": 128,
+      "h": 34
+    },
+    {
+      "name": "button_confirm",
+      "x": 180,
+      "y": 718,
+      "w": 128,
+      "h": 34
+    },
+    {
+      "name": "mission_timeline_panel",
+      "x": 334,
+      "y": 638,
+      "w": 275,
+      "h": 85
+    },
+    {
+      "name": "sector_coordinates_panel",
+      "x": 637,
+      "y": 634,
+      "w": 166,
+      "h": 78
+    },
+    {
+      "name": "beacon_blue",
+      "x": 852,
+      "y": 635,
+      "w": 47,
+      "h": 89
+    },
+    {
+      "name": "beacon_green",
+      "x": 920,
+      "y": 635,
+      "w": 47,
+      "h": 89
+    },
+    {
+      "name": "beacon_yellow",
+      "x": 989,
+      "y": 635,
+      "w": 47,
+      "h": 89
+    },
+    {
+      "name": "beacon_red",
+      "x": 1058,
+      "y": 635,
+      "w": 47,
+      "h": 89
+    },
+    {
+      "name": "flag_blue",
+      "x": 1145,
+      "y": 627,
+      "w": 75,
+      "h": 111
+    },
+    {
+      "name": "flag_purple",
+      "x": 1225,
+      "y": 628,
+      "w": 74,
+      "h": 111
+    },
+    {
+      "name": "flag_orange",
+      "x": 1304,
+      "y": 628,
+      "w": 75,
+      "h": 111
+    },
+    {
+      "name": "flag_green",
+      "x": 1387,
+      "y": 628,
+      "w": 75,
+      "h": 111
+    },
+    {
+      "name": "crate_gray",
+      "x": 20,
+      "y": 778,
+      "w": 137,
+      "h": 80
+    },
+    {
+      "name": "crate_blue",
+      "x": 166,
+      "y": 777,
+      "w": 137,
+      "h": 82
+    },
+    {
+      "name": "crate_purple",
+      "x": 313,
+      "y": 777,
+      "w": 137,
+      "h": 82
+    },
+    {
+      "name": "crate_yellow",
+      "x": 461,
+      "y": 776,
+      "w": 137,
+      "h": 83
+    },
+    {
+      "name": "crate_red",
+      "x": 609,
+      "y": 775,
+      "w": 137,
+      "h": 84
+    },
+    {
+      "name": "crystal_blue",
+      "x": 775,
+      "y": 761,
+      "w": 75,
+      "h": 97
+    },
+    {
+      "name": "crystal_purple",
+      "x": 884,
+      "y": 767,
+      "w": 78,
+      "h": 91
+    },
+    {
+      "name": "crystal_orange",
+      "x": 1001,
+      "y": 765,
+      "w": 76,
+      "h": 94
+    },
+    {
+      "name": "crystal_green",
+      "x": 1115,
+      "y": 768,
+      "w": 76,
+      "h": 91
+    },
+    {
+      "name": "energy_cell",
+      "x": 1225,
+      "y": 765,
+      "w": 52,
+      "h": 92
+    },
+    {
+      "name": "power_cube",
+      "x": 1311,
+      "y": 775,
+      "w": 65,
+      "h": 73
+    },
+    {
+      "name": "round_device",
+      "x": 1408,
+      "y": 772,
+      "w": 63,
+      "h": 75
+    },
+    {
+      "name": "thruster_device",
+      "x": 1480,
+      "y": 775,
+      "w": 56,
+      "h": 77
+    },
+    {
+      "name": "explosion_fire",
+      "x": 17,
+      "y": 884,
+      "w": 109,
+      "h": 107
+    },
+    {
+      "name": "starburst_blue",
+      "x": 157,
+      "y": 903,
+      "w": 79,
+      "h": 79
+    },
+    {
+      "name": "wormhole_purple",
+      "x": 284,
+      "y": 886,
+      "w": 139,
+      "h": 112
+    },
+    {
+      "name": "radar_green",
+      "x": 427,
+      "y": 887,
+      "w": 113,
+      "h": 111
+    },
+    {
+      "name": "teleporter_beam",
+      "x": 558,
+      "y": 884,
+      "w": 107,
+      "h": 113
+    },
+    {
+      "name": "arrows_blue",
+      "x": 670,
+      "y": 918,
+      "w": 94,
+      "h": 49
+    },
+    {
+      "name": "arrows_green",
+      "x": 790,
+      "y": 918,
+      "w": 78,
+      "h": 48
+    },
+    {
+      "name": "arrows_yellow",
+      "x": 911,
+      "y": 918,
+      "w": 78,
+      "h": 48
+    },
+    {
+      "name": "arrows_red",
+      "x": 1030,
+      "y": 918,
+      "w": 78,
+      "h": 48
+    },
+    {
+      "name": "empty_panel_dark",
+      "x": 1046,
+      "y": 891,
+      "w": 123,
+      "h": 99
+    },
+    {
+      "name": "empty_panel_blue",
+      "x": 1194,
+      "y": 891,
+      "w": 126,
+      "h": 99
+    },
+    {
+      "name": "selection_brackets",
+      "x": 1364,
+      "y": 891,
+      "w": 137,
+      "h": 100
+    }
+  ]
+}
