@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 
 use notify::{recommended_watcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Manager};
@@ -686,17 +686,33 @@ fn summarize_events(
         return;
     };
 
-    if let Ok(metadata) = file.metadata() {
-        // Bumped from 512KiB → 8MiB. A long-running Copilot session can
-        // accumulate 50MB+ of events; 512KiB only captured the most
-        // recent ~30-50 tool calls, which meant low-volume categories
-        // like Intent (`report_intent`) were invisible whenever bash
-        // bursts dominated the tail. 8MiB gives ~5-15 minutes of
-        // history on a busy session and parses in a few ms.
-        const MAX_READ_BYTES: u64 = 8 * 1024 * 1024;
-        if metadata.len() > MAX_READ_BYTES {
-            let _ = file.seek(SeekFrom::Start(metadata.len() - MAX_READ_BYTES));
+    // Tail-window limit. The full-event scan (recent tools, errors,
+    // last_tool, recent_events list) only reads the last MAX_READ_BYTES
+    // of the file: that gives ~5-15 minutes of busy-session history and
+    // parses in a few ms, even for a 100 MB+ events.jsonl. Bumped from
+    // 512 KiB → 8 MiB because 512 KiB only captured the most recent
+    // ~30-50 tool calls, which made low-volume categories like Intent
+    // (`report_intent`) invisible whenever bash bursts dominated.
+    const MAX_READ_BYTES: u64 = 8 * 1024 * 1024;
+
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+
+    // If the file is larger than the tail window, pre-scan the SKIPPED
+    // portion (0 .. file_len - MAX_READ_BYTES) for compaction/shutdown
+    // token events ONLY. Without this, long-running sessions whose most
+    // recent `session.compaction_complete` got pushed out of the 8 MiB
+    // tail by a burst of `tool.execution_complete` events would show
+    // 0 input tokens (Copilot's `assistant.message` events carry
+    // outputTokens but NOT inputTokens, so input is only ever recorded
+    // at compaction or shutdown). The head scan is cheap because we
+    // substring-filter lines before JSON-parsing, so only the ~1 in
+    // 4 MB of lines that actually contain a token event get parsed.
+    if file_len > MAX_READ_BYTES {
+        if let Ok(head_file) = fs::File::open(path) {
+            let head_reader = BufReader::new(head_file.take(file_len - MAX_READ_BYTES));
+            fold_skipped_token_events(head_reader, summary);
         }
+        let _ = file.seek(SeekFrom::Start(file_len - MAX_READ_BYTES));
     }
 
     // Pending tool starts keyed by tool name. Lets us compute duration
@@ -852,54 +868,15 @@ fn summarize_events(
             {
                 summary.output_tokens += tokens;
             }
-        } else if event_type == "session.compaction_complete" {
-            // `compactionTokensUsed.inputTokens` / `outputTokens` are
-            // the tokens consumed BY each compaction operation
-            // (~200 KTok per call), not a running total of the
-            // conversation — so summing them across N compactions
-            // legitimately accounts for "tokens the agent spent on
-            // self-compaction this session".
-            if let Some(used) = value.get("data").and_then(|d| d.get("compactionTokensUsed")) {
-                if let Some(n) = used.get("inputTokens").and_then(|v| v.as_u64()) {
-                    summary.input_tokens += n;
-                }
-                if let Some(n) = used.get("outputTokens").and_then(|v| v.as_u64()) {
-                    summary.output_tokens += n;
-                }
-            }
-        } else if event_type == "session.shutdown" {
-            // On shutdown Copilot emits the cumulative session totals.
-            // We deliberately EXCLUDE `cache_read.tokenCount` from the
-            // input total: cache reads are the cached prefix the model
-            // re-fetches on every turn, which can balloon into the
-            // hundreds of millions for a long session (one observed
-            // session reported 321M cache reads vs 125K fresh input
-            // and 10M cache writes). Including cache reads made the
-            // "Tokens · 24h" card report ~333M for a normal day of
-            // coding, which both visually overflowed the card and
-            // misrepresented actual model work — cache reads are
-            // billed at a tiny fraction of fresh input rates and the
-            // model doesn't process them from scratch.
-            //
-            // We DO include `cache_write` because cache writes are the
-            // model committing new content to cache and are billed at
-            // the same (or higher) rate as fresh input — they
-            // represent real work.
-            if let Some(details) = value.get("data").and_then(|d| d.get("tokenDetails")) {
-                let fresh = details
-                    .get("input").and_then(|v| v.get("tokenCount")).and_then(|v| v.as_u64()).unwrap_or(0);
-                let cache_write = details
-                    .get("cache_write").and_then(|v| v.get("tokenCount")).and_then(|v| v.as_u64()).unwrap_or(0);
-                let total_in = fresh + cache_write;
-                if total_in > summary.input_tokens {
-                    summary.input_tokens = total_in;
-                }
-                let out = details
-                    .get("output").and_then(|v| v.get("tokenCount")).and_then(|v| v.as_u64()).unwrap_or(0);
-                if out > summary.output_tokens {
-                    summary.output_tokens = out;
-                }
-            }
+        } else if event_type == "session.compaction_complete"
+            || event_type == "session.shutdown"
+        {
+            // Token aggregation is shared with the head-pass helper
+            // (`fold_skipped_token_events`) so the same accounting rules
+            // apply whether the event lands in the 8 MiB tail or in the
+            // earlier portion of a long-running file. See the helper's
+            // doc for the cache_read / cache_write semantics.
+            apply_token_event(&value, event_type, summary);
         } else if matches!(
             event_type,
             "assistant.turn_start" | "assistant.turn_end" | "user.message" | "session.start"
@@ -916,6 +893,110 @@ fn summarize_events(
                 category: categorize_event(event_type).to_string(),
                 success: true,
             });
+        }
+    }
+}
+
+/// Apply the token deltas from a single `session.compaction_complete`
+/// or `session.shutdown` event to `summary`.
+///
+/// **Compaction**: `compactionTokensUsed.inputTokens` / `outputTokens`
+/// are the tokens consumed BY each compaction operation (~200 KTok per
+/// call), not a running total of the conversation. Summing across all
+/// compactions in the session legitimately accounts for "tokens the
+/// agent spent on self-compaction this session" — they're additive.
+///
+/// **Shutdown**: Copilot emits cumulative session totals in a four-
+/// bucket `tokenDetails` block (input / cache_read / cache_write /
+/// output). We deliberately EXCLUDE `cache_read.tokenCount` from the
+/// input total: cache reads are the cached prefix the model re-fetches
+/// on every turn, which can balloon into the hundreds of millions for
+/// a long session (one observed session reported 321M cache reads vs
+/// 125K fresh input and 10M cache writes). Including cache reads made
+/// the "Tokens · 24h" card report ~333M for a normal day of coding,
+/// which both overflowed the card and misrepresented actual model work.
+/// Cache reads are billed at a tiny fraction of fresh-input rates and
+/// the model doesn't process them from scratch.
+///
+/// We DO include `cache_write` because cache writes are the model
+/// committing new content to cache and are billed at the same (or
+/// higher) rate as fresh input — they represent real work.
+///
+/// Shutdown REPLACES the totals if its number is larger than the
+/// running sum (using `max`), so a shutdown checkpoint that includes
+/// pre-shutdown compactions doesn't double-count those compactions,
+/// while any post-shutdown compactions still add on top.
+fn apply_token_event(
+    value: &serde_json::Value,
+    event_type: &str,
+    summary: &mut AgentSessionSummary,
+) {
+    match event_type {
+        "session.compaction_complete" => {
+            if let Some(used) = value.get("data").and_then(|d| d.get("compactionTokensUsed")) {
+                if let Some(n) = used.get("inputTokens").and_then(|v| v.as_u64()) {
+                    summary.input_tokens += n;
+                }
+                if let Some(n) = used.get("outputTokens").and_then(|v| v.as_u64()) {
+                    summary.output_tokens += n;
+                }
+            }
+        }
+        "session.shutdown" => {
+            if let Some(details) = value.get("data").and_then(|d| d.get("tokenDetails")) {
+                let fresh = details
+                    .get("input")
+                    .and_then(|v| v.get("tokenCount"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let cache_write = details
+                    .get("cache_write")
+                    .and_then(|v| v.get("tokenCount"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let total_in = fresh + cache_write;
+                if total_in > summary.input_tokens {
+                    summary.input_tokens = total_in;
+                }
+                let out = details
+                    .get("output")
+                    .and_then(|v| v.get("tokenCount"))
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                if out > summary.output_tokens {
+                    summary.output_tokens = out;
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Streaming scan of the portion of events.jsonl that the tail-window
+/// scan in `summarize_events` skipped. Aggregates input/output tokens
+/// from `session.compaction_complete` and `session.shutdown` events
+/// ONLY — everything else (recent events, tool counts, error counts,
+/// last_tool, etc.) is intentionally NOT updated here, so the tail
+/// scan remains the single source of truth for "what's happening
+/// right now".
+///
+/// Lines are substring-filtered before JSON parsing so the per-line
+/// cost is essentially free for the 99%+ of events that aren't token
+/// events. On a 163 MB file with 42 compactions this completes in
+/// well under a second.
+fn fold_skipped_token_events<R: BufRead>(reader: R, summary: &mut AgentSessionSummary) {
+    for line in reader.lines().map_while(Result::ok) {
+        let is_compaction = line.contains("\"session.compaction_complete\"");
+        let is_shutdown = line.contains("\"session.shutdown\"");
+        if !is_compaction && !is_shutdown {
+            continue;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let event_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
+        if event_type == "session.compaction_complete" || event_type == "session.shutdown" {
+            apply_token_event(&value, event_type, summary);
         }
     }
 }
@@ -1534,6 +1615,94 @@ mod tests {
         );
         // Output: shutdown's 2M wins over the per-message 1K (max()).
         assert_eq!(summary.output_tokens, 2_000_000);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Direct unit test for `fold_skipped_token_events`. The helper
+    /// must accumulate compaction tokens, accept a shutdown that
+    /// reports a larger total (max), and ignore non-token lines.
+    #[test]
+    fn fold_skipped_token_events_aggregates_compactions_and_shutdown() {
+        let input = concat!(
+            // Two compactions: 100K + 200K = 300K input, 1K + 2K = 3K output.
+            r#"{"type":"session.compaction_complete","data":{"compactionTokensUsed":{"inputTokens":100000,"outputTokens":1000}}}"#, "\n",
+            r#"{"type":"assistant.message","data":{"outputTokens":50}}"#, "\n",
+            r#"{"type":"session.compaction_complete","data":{"compactionTokensUsed":{"inputTokens":200000,"outputTokens":2000}}}"#, "\n",
+            // Shutdown reports 500K fresh + 50K cache_write = 550K, which
+            // is larger than the running 300K from compactions, so it
+            // should REPLACE input_tokens (not add).
+            r#"{"type":"session.shutdown","data":{"tokenDetails":{"input":{"tokenCount":500000},"cache_write":{"tokenCount":50000},"cache_read":{"tokenCount":999999999},"output":{"tokenCount":10000}}}}"#, "\n",
+            r#"{"type":"tool.execution_complete","data":{"toolCallId":"abc"}}"#, "\n",
+        );
+        let mut summary = AgentSessionSummary::default();
+        fold_skipped_token_events(std::io::Cursor::new(input), &mut summary);
+        assert_eq!(summary.input_tokens, 550_000, "shutdown must replace running compaction sum when larger");
+        // Output: 1K + 2K (compactions) = 3K, then max(3K, 10K shutdown) = 10K.
+        assert_eq!(summary.output_tokens, 10_000);
+    }
+
+    /// Regression: when events.jsonl is larger than the 8 MiB tail
+    /// window AND the most recent compaction has been pushed past the
+    /// window, the selected-session panel showed 0 input tokens
+    /// because the tail scan never saw any token-bearing event. The
+    /// head-pass added by `fold_skipped_token_events` must recover
+    /// these compaction tokens from the skipped portion.
+    #[test]
+    fn compactions_outside_tail_window_still_counted() {
+        use std::io::Write;
+        let mut path = std::env::temp_dir();
+        path.push("cmc_test_compaction_outside_tail.jsonl");
+        // Best-effort cleanup from any prior failed run so we don't
+        // accumulate stale data inside the same temp file.
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let f = std::fs::File::create(&path).expect("create temp jsonl");
+            let mut bw = std::io::BufWriter::new(f);
+            // One compaction at the very start (deep inside the head
+            // region once the file grows past 8 MiB).
+            writeln!(
+                bw,
+                r#"{{"type":"session.compaction_complete","timestamp":"2026-01-01T00:00:00Z","data":{{"compactionTokensUsed":{{"inputTokens":250000,"outputTokens":3000}}}}}}"#
+            )
+            .unwrap();
+            // Pad with filler tool events until the file is well past
+            // the 8 MiB tail window. Each line is ~300 bytes; ~32K
+            // lines puts us at ~9.6 MB.
+            let filler = r#"{"type":"tool.execution_complete","timestamp":"2026-01-01T00:00:00Z","data":{"toolCallId":"pad","model":"x","interactionId":"i","turnId":"1","success":true,"result":{"content":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}}}"#;
+            for _ in 0..32_000 {
+                writeln!(bw, "{}", filler).unwrap();
+            }
+        }
+
+        let metadata = std::fs::metadata(&path).expect("stat temp jsonl");
+        assert!(
+            metadata.len() > 8 * 1024 * 1024,
+            "test file must exceed the 8 MiB tail window, got {} bytes",
+            metadata.len()
+        );
+
+        let mut summary = AgentSessionSummary::default();
+        let mut tool_counts = BTreeMap::new();
+        let mut recent_events = Vec::new();
+        let allowlist = HashSet::new();
+        summarize_events(
+            "test",
+            &path,
+            "test-session",
+            &mut summary,
+            &mut tool_counts,
+            &mut recent_events,
+            &allowlist,
+        );
+
+        assert_eq!(
+            summary.input_tokens, 250_000,
+            "compaction outside the tail window must still be aggregated; got {}",
+            summary.input_tokens
+        );
+        assert_eq!(summary.output_tokens, 3_000);
 
         let _ = std::fs::remove_file(&path);
     }
