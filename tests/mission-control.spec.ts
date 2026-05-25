@@ -11,9 +11,15 @@ const MISSION_FIXTURE = {
   total_tool_calls: 47,
   total_output_tokens: 8120,
   sessions: [
-    { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 82, tool_count: 23, write_count: 8, read_count: 9, command_count: 4, web_count: 1, task_count: 3, delegates_count: 1, skills_count: 2, court_count: 4, mcp_count: 1, error_count: 0, output_tokens: 4200, last_tool: 'apply_patch', last_event_kind: 'tool.execution_start', last_event_category: 'forge', stale_seconds: 12 },
-    { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 64, tool_count: 17, write_count: 2, read_count: 7, command_count: 6, web_count: 0, task_count: 5, delegates_count: 2, skills_count: 3, court_count: 1, mcp_count: 4, error_count: 1, output_tokens: 2920, last_tool: 'bash', last_event_kind: 'tool.execution_complete', last_event_category: 'alert', stale_seconds: 25 },
-    { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: false, status: 'idle', event_count: 38, tool_count: 7, write_count: 0, read_count: 3, command_count: 0, web_count: 4, task_count: 0, delegates_count: 0, skills_count: 0, court_count: 0, mcp_count: 0, error_count: 0, output_tokens: 1000, last_tool: 'web_fetch', last_event_kind: 'tool.execution_start', last_event_category: 'signal', stale_seconds: 900 },
+    { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 82, tool_count: 23, write_count: 8, read_count: 9, command_count: 4, web_count: 1, task_count: 3, delegates_count: 1, skills_count: 2, court_count: 4, mcp_count: 1, error_count: 0, input_tokens: 1600, output_tokens: 4200, last_tool: 'apply_patch', last_event_kind: 'tool.execution_start', last_event_category: 'forge', stale_seconds: 12, token_checkpoints: [
+      { timestamp: '2026-05-21T07:11:00Z', input_tokens: 100, output_tokens: 200 },
+      { timestamp: '2026-05-21T07:13:00Z', input_tokens: 400, output_tokens: 900 },
+      { timestamp: '2026-05-21T07:15:00Z', input_tokens: 1600, output_tokens: 4200 },
+    ] },
+    { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 64, tool_count: 17, write_count: 2, read_count: 7, command_count: 6, web_count: 0, task_count: 5, delegates_count: 2, skills_count: 3, court_count: 1, mcp_count: 4, error_count: 1, input_tokens: 1200, output_tokens: 2920, last_tool: 'bash', last_event_kind: 'tool.execution_complete', last_event_category: 'alert', stale_seconds: 25, token_checkpoints: [
+      { timestamp: '2026-05-21T07:14:00Z', input_tokens: 1200, output_tokens: 2920 },
+    ] },
+    { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: false, status: 'idle', event_count: 38, tool_count: 7, write_count: 0, read_count: 3, command_count: 0, web_count: 4, task_count: 0, delegates_count: 0, skills_count: 0, court_count: 0, mcp_count: 0, error_count: 0, input_tokens: 500, output_tokens: 1000, last_tool: 'web_fetch', last_event_kind: 'tool.execution_start', last_event_category: 'signal', stale_seconds: 900 },
   ],
   tools: [
     { name: 'view', category: 'library', count: 14 },
@@ -296,7 +302,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(state!.toolCalls).toBe(47);
     expect(state!.sessionCount).toBe(3);
     await expect(page.locator('#dom-workmix')).toBeVisible();
-    await expect(page.locator('#dom-workmix')).toContainText('Recent work mix');
+    await expect(page.locator('#dom-workmix')).toContainText('Activity mix');
     await expect(page.locator('#dom-workmix [data-cmc-action="workmix-scope"]')).toBeVisible();
     await expect(page.locator('#dom-workmix .cmc-work-row')).toHaveCount(6);
     const layout = await page.evaluate(() => {
@@ -365,7 +371,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     const text = await page.locator('#dom-session').innerText();
     expect(text).toContain('Last: bash completed');
     expect(text).toContain('Tool: bash');
-    expect(text).toContain('Tokens in/out: 0/3k');
+    expect(text).toContain('Tokens in/out: 1,200/2,920');
     expect(text).toMatch(/Age: \d+s/);
     expect(text).not.toContain('session.shutdown');
     expect(text).not.toContain('report_intent');
@@ -425,6 +431,8 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(state!.replayState.paused).toBe(false);
     await expect(page.locator('#dom-replay [data-cmc-action="replay-toggle"]')).toBeVisible();
     await expect(page.locator('#dom-replay [data-cmc-action="replay-seek"]')).toBeVisible();
+    await expect(page.locator('#dom-feed .cmc-panel-title')).toHaveText('Recent Activity Feed');
+    await expect(page.locator('#dom-replay .cmc-replay-status')).toContainText('Recent activity replay');
   });
 
   test('clicking pause freezes replay; clicking live resumes', async ({ page }) => {
@@ -451,6 +459,39 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     const after = await getMissionState(page);
     expect(after!.replayState.cursor).toBeLessThan(before!.replayState.cursor);
     expect(after!.replayState.atLive).toBe(false);
+    await expect(page.locator('#dom-feed .cmc-panel-title')).toHaveText('Recent Activity Feed · replay cursor');
+    await expect(page.locator('#dom-feed .cmc-feed-row')).toContainText('web_fetch');
+    await expect(page.locator('#dom-feed .cmc-feed-row')).toContainText('at cursor');
+  });
+
+  test('selected session stats reflect replay cursor activity', async ({ page }) => {
+    await page.locator('#dom-session [data-cmc-action="session-select"]').selectOption('alpha123');
+    const track = page.locator('#dom-replay [data-cmc-action="replay-seek"]');
+    const box = await track.boundingBox();
+    expect(box).toBeTruthy();
+    await page.mouse.click(box!.x + box!.width * 0.5, box!.y + box!.height / 2);
+    await page.waitForTimeout(120);
+
+    const meta = page.locator('#dom-session .cmc-session-meta');
+    await expect(meta).toContainText('Last: view started');
+    await expect(meta).toContainText('Tool: view');
+    await expect(meta).toContainText('Age: at cursor');
+    await expect(meta).toContainText('Tokens in/out: 400/900');
+    const scope = page.locator('#workmix-scope-select');
+    await scope.selectOption('selected');
+    const rows = page.locator('#dom-workmix .cmc-work-row');
+    await expect(rows.nth(0)).toContainText('Read');
+    await expect(rows.nth(0)).toContainText('9');
+    await expect(rows.nth(1)).toContainText('Edit');
+    await expect(rows.nth(1)).toContainText('7');
+    await scope.selectOption('running');
+    await expect(rows.nth(0)).toContainText('16');
+    await expect(rows.nth(1)).toContainText('9');
+
+    await page.mouse.click(box!.x + box!.width * 0.95, box!.y + box!.height / 2);
+    await page.waitForTimeout(120);
+    await expect(meta).toContainText('Tokens in/out: 1,600/4,200');
+    await expect(rows.nth(1)).toContainText('10');
   });
 
   test('replay timeline exposes keyboard slider controls', async ({ page }) => {

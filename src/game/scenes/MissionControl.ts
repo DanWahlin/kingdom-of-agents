@@ -17,6 +17,8 @@ interface CopilotEventSummary {
   tool: string;
   category: MissionCategory | string;
   success: boolean;
+  input_tokens?: number;
+  output_tokens?: number;
 }
 
 interface CopilotSessionSummary {
@@ -51,6 +53,18 @@ interface CopilotSessionSummary {
   git_root?: string;
   recent_tool_calls?: SessionToolCall[];
   recent_turns?: SessionTurnSummary[];
+  token_checkpoints?: SessionTokenCheckpoint[];
+  replay_activity?: {
+    last: string;
+    tool: string;
+    age: string;
+  };
+}
+
+interface SessionTokenCheckpoint {
+  timestamp: string;
+  input_tokens: number;
+  output_tokens: number;
 }
 
 interface SessionToolCall {
@@ -103,6 +117,8 @@ interface CopilotActivity {
   alerts: string[];
   generated_at_ms: number;
 }
+
+type WorkMixCounts = { read: number; write: number; command: number; web: number; task: number; mcp: number };
 
 interface Quarter {
   key: MissionCategory;
@@ -1335,31 +1351,42 @@ export class MissionControlScene extends Phaser.Scene {
     }));
     const feedY = layout.topY + layout.sessionH + (compact ? 14 : 22);
     const feedH = Math.max(140, layout.bottomY - feedY - 16);
-    const visibleLog = this.eventLog.slice(0, this.replayCursor);
-    const nowMs = Date.now();
+    const total = this.eventLog.length;
+    const cursor = this.replayCursor;
+    const atLive = this.isAtLive();
+    const visibleLog = this.eventLog.slice(0, cursor);
+    const futureLog = this.eventLog.slice(cursor);
+    const cursorEvent = visibleLog[visibleLog.length - 1];
+    const cursorTimeMs = eventTimestampMs(cursorEvent?.timestamp);
+    const feedAnchorMs = atLive ? Date.now() : (cursorTimeMs ?? Date.now());
     const feed = visibleLog
       .slice(-30)
       .reverse()
-      .map(event => ({ event, ageS: eventAgeSeconds(event.timestamp, nowMs) }))
-      .filter(({ ageS }) => ageS <= 300)
+      .map(event => ({ event, ageS: eventAgeSeconds(event.timestamp, feedAnchorMs) }))
       .map(({ event, ageS }) => ({
         label: feedLabel(event),
-        age: `${formatAge(ageS)} ago`,
+        age: atLive
+          ? `${formatAge(ageS)} ago`
+          : ageS === 0 ? 'at cursor' : `${formatAge(ageS)} before`,
         category: event.category,
         success: event.success,
       }));
     const quarter = this.buildQuarterView();
-    const work = workMix(this.activity);
-    const total = this.eventLog.length;
-    const cursor = this.replayCursor;
-    const atLive = this.isAtLive();
+    const work = atLive ? workMix(this.activity) : projectedWorkMix(this.activity.sessions, futureLog);
+    const cursorLabel = cursorEvent ? ` · ${formatEventClock(cursorEvent.timestamp)}` : '';
     const replayStatus = total === 0
-      ? 'waiting for events'
+      ? 'Recent activity replay · waiting for events'
       : atLive
-        ? `${cursor} / ${total} · live`
+        ? `Recent activity replay · ${cursor} / ${total} · live${cursorLabel}`
         : this.replayPaused
-          ? `${cursor} / ${total} · paused`
-          : `${cursor} / ${total} · replaying`;
+          ? `Recent activity replay · ${cursor} / ${total} · paused${cursorLabel}`
+          : `Recent activity replay · ${cursor} / ${total} · playing${cursorLabel}`;
+    const selectedSessionView = this.buildSelectedSessionView(
+      this.selectedSession,
+      visibleLog,
+      atLive,
+      cursorTimeMs,
+    );
     window.__cmcRenderDashboard({
       panelsHidden: this.panelsHidden,
       layout: {
@@ -1394,32 +1421,29 @@ export class MissionControlScene extends Phaser.Scene {
         header: activeOptions.length > 0 ? `Running sessions (${activeOptions.length})` : 'Recent sessions (none active)',
         rows: this.sessionPickerRows,
         idleCount: Math.max(0, sessionOptions.length - pickerOptions.length),
-        options: sessionOptions.map(({ session, index }) => ({
-          id: session.id,
-          index,
-          title: session.title || session.id,
-          shortId: session.id.length > 8 ? session.id.slice(0, 8) : session.id,
-          status: session.status,
-          isActive: session.is_active,
-          mix: {
-            read: session.read_count ?? 0,
-            write: session.write_count ?? 0,
-            command: session.command_count ?? 0,
-            web: session.web_count ?? 0,
-            task: session.task_count ?? 0,
-            delegates: session.delegates_count ?? session.task_count ?? 0,
-            skills: session.skills_count ?? 0,
-            court: session.court_count ?? 0,
-            mcp: session.mcp_count ?? 0,
-          },
-        })),
-        selected: this.selectedSession,
+        options: sessionOptions.map(({ session, index }) => {
+          const mix = atLive
+            ? sessionSnapshotMix(session)
+            : projectedSessionMix(session, futureLog);
+          return {
+            id: session.id,
+            index,
+            title: session.title || session.id,
+            shortId: session.id.length > 8 ? session.id.slice(0, 8) : session.id,
+            status: session.status,
+            isActive: session.is_active,
+            mix,
+          };
+        }),
+        selected: selectedSessionView,
       },
       feed: {
-        title: this.isAtLive() ? 'Activity Feed' : 'Activity Feed · replay view',
+        title: atLive ? 'Recent Activity Feed' : 'Recent Activity Feed · replay cursor',
         rows: feed,
         empty: this.activity.available
-          ? 'No recent Copilot events found. Start a Copilot CLI session and this mission control will wake up.'
+          ? total === 0
+            ? 'No recent Copilot events found. Start a Copilot CLI session and this mission control will wake up.'
+            : 'No Copilot events are visible at this replay position.'
           : 'Copilot CLI was not detected. Install or run Copilot CLI to populate this mission.',
       },
       quarter,
@@ -1431,6 +1455,47 @@ export class MissionControlScene extends Phaser.Scene {
         status: replayStatus,
       },
     });
+  }
+
+  private buildSelectedSessionView(
+    selected: CopilotSessionSummary | null,
+    visibleLog: CopilotEventSummary[],
+    atLive: boolean,
+    cursorTimeMs: number | null,
+  ): CopilotSessionSummary | null {
+    if (!selected) return null;
+    if (atLive) return selected;
+
+    const selectedEvents = visibleLog.filter(event => eventBelongsToSession(event, selected.id));
+    const latestEvent = selectedEvents[selectedEvents.length - 1];
+    const tokenEvent = [...selectedEvents]
+      .reverse()
+      .find(event => event.input_tokens !== undefined || event.output_tokens !== undefined);
+    const tokenCheckpoint = latestTokenCheckpoint(selected.token_checkpoints, cursorTimeMs);
+    const inputTokens = tokenCheckpoint?.input_tokens ?? tokenEvent?.input_tokens ?? 0;
+    const outputTokens = tokenCheckpoint?.output_tokens ?? tokenEvent?.output_tokens ?? 0;
+    const replayActivity = latestEvent
+      ? {
+          last: replaySessionLastLabel(latestEvent),
+          tool: latestEvent.tool || 'none',
+          age: replayAgeLabel(latestEvent.timestamp, cursorTimeMs),
+        }
+      : {
+          last: 'No visible activity at cursor',
+          tool: 'none',
+          age: 'not reached',
+        };
+
+    return {
+      ...selected,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      last_tool: replayActivity.tool,
+      last_event_kind: latestEvent?.kind ?? '',
+      last_event_category: latestEvent?.category,
+      last_event_timestamp: latestEvent?.timestamp ?? '',
+      replay_activity: replayActivity,
+    };
   }
 
   private addText(x: number, y: number, text: string, size: number, color: string) {
@@ -1827,15 +1892,19 @@ export class MissionControlScene extends Phaser.Scene {
     if (this.replayPaused) return;
     if (this.isAtLive() || this.quarters.length === 0) return;
     this.replayPlayTimer += delta;
+    let advanced = false;
     while (this.replayPlayTimer >= this.replayPlaybackInterval && !this.isAtLive()) {
       this.replayPlayTimer -= this.replayPlaybackInterval;
       const event = this.eventLog[this.replayCursor++];
       this.queueEventPulse(event, 'replay');
+      advanced = true;
     }
     if (this.isAtLive()) {
       this.replayPlayTimer = 0;
     }
+    if (!advanced) return;
     this.updateReplayState();
+    this.publishDashboardView();
   }
 
   public seekReplay(cursor: number) {
@@ -2128,7 +2197,22 @@ function detectConcreteOpsSignal(activity: CopilotActivity): OpsSummary | null {
   return null;
 }
 
-function workMix(activity: CopilotActivity) {
+function createEmptyWorkMix(): WorkMixCounts {
+  return { read: 0, write: 0, command: 0, web: 0, task: 0, mcp: 0 };
+}
+
+function sessionSnapshotMix(session: CopilotSessionSummary): WorkMixCounts {
+  return {
+    read: session.read_count ?? 0,
+    write: session.write_count ?? 0,
+    command: session.command_count ?? 0,
+    web: session.web_count ?? 0,
+    task: session.task_count ?? 0,
+    mcp: session.mcp_count ?? 0,
+  };
+}
+
+function workMix(activity: CopilotActivity): WorkMixCounts {
   return activity.sessions.reduce(
     (mix, session) => ({
       read: mix.read + session.read_count,
@@ -2138,8 +2222,52 @@ function workMix(activity: CopilotActivity) {
       task: mix.task + session.task_count,
       mcp: mix.mcp + (session.mcp_count ?? 0),
     }),
-    { read: 0, write: 0, command: 0, web: 0, task: 0, mcp: 0 },
+    createEmptyWorkMix(),
   );
+}
+
+function projectedSessionMix(session: CopilotSessionSummary, futureEvents: CopilotEventSummary[]): WorkMixCounts {
+  const mix = sessionSnapshotMix(session);
+  for (const event of futureEvents) {
+    if (event.kind !== 'tool.execution_start' || !eventBelongsToSession(event, session.id)) continue;
+    const key = workMixKeyForCategory(event.category);
+    if (!key) continue;
+    mix[key] = Math.max(0, mix[key] - 1);
+  }
+  return mix;
+}
+
+function projectedWorkMix(sessions: CopilotSessionSummary[], futureEvents: CopilotEventSummary[]): WorkMixCounts {
+  return sessions.reduce((mix, session) => {
+    const sessionMix = projectedSessionMix(session, futureEvents);
+    return {
+      read: mix.read + sessionMix.read,
+      write: mix.write + sessionMix.write,
+      command: mix.command + sessionMix.command,
+      web: mix.web + sessionMix.web,
+      task: mix.task + sessionMix.task,
+      mcp: mix.mcp + sessionMix.mcp,
+    };
+  }, createEmptyWorkMix());
+}
+
+function workMixFromEvents(events: CopilotEventSummary[]): WorkMixCounts {
+  return events.reduce((mix, event) => {
+    if (event.kind !== 'tool.execution_start') return mix;
+    const key = workMixKeyForCategory(event.category);
+    if (!key) return mix;
+    return { ...mix, [key]: mix[key] + 1 };
+  }, createEmptyWorkMix());
+}
+
+function workMixKeyForCategory(category: string): keyof WorkMixCounts | null {
+  if (category === 'library') return 'read';
+  if (category === 'forge') return 'write';
+  if (category === 'terminal') return 'command';
+  if (category === 'signal') return 'web';
+  if (category === 'mcp') return 'mcp';
+  if (category === 'delegates' || category === 'skills' || category === 'court') return 'task';
+  return null;
 }
 
 function dominantWork(mix: ReturnType<typeof workMix>) {
@@ -2376,9 +2504,37 @@ function formatAge(seconds?: number) {
 /// and returns the elapsed seconds vs `nowMs`. Falls back to 0 for
 /// malformed timestamps so the feed never crashes on bad input.
 function eventAgeSeconds(timestamp: string, nowMs = Date.now()): number {
-  const t = Date.parse(timestamp);
-  if (Number.isNaN(t)) return 0;
+  const t = eventTimestampMs(timestamp);
+  if (t === null) return 0;
   return Math.max(0, Math.floor((nowMs - t) / 1000));
+}
+
+function eventTimestampMs(timestamp?: string): number | null {
+  const t = Date.parse(timestamp ?? '');
+  return Number.isNaN(t) ? null : t;
+}
+
+function latestTokenCheckpoint(checkpoints: SessionTokenCheckpoint[] | undefined, cursorTimeMs: number | null) {
+  if (!checkpoints?.length || cursorTimeMs === null) return null;
+  let latest: SessionTokenCheckpoint | null = null;
+  for (const checkpoint of checkpoints) {
+    const t = eventTimestampMs(checkpoint.timestamp);
+    if (t === null || t > cursorTimeMs) continue;
+    if (!latest || t >= (eventTimestampMs(latest.timestamp) ?? 0)) {
+      latest = checkpoint;
+    }
+  }
+  return latest;
+}
+
+function formatEventClock(timestamp: string) {
+  const t = eventTimestampMs(timestamp);
+  if (t === null) return 'unknown time';
+  return new Date(t).toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
 function feedLabel(event: CopilotEventSummary) {
@@ -2386,9 +2542,30 @@ function feedLabel(event: CopilotEventSummary) {
   if (event.kind === 'tool.execution_complete') return event.success ? 'tool completed' : 'tool failed';
   if (event.kind === 'assistant.turn_start') return 'Copilot started thinking';
   if (event.kind === 'assistant.turn_end') return 'Copilot is waiting';
+  if (event.kind === 'assistant.message') return 'token update';
+  if (event.kind === 'session.compaction_complete') return 'compaction token checkpoint';
+  if (event.kind === 'session.shutdown') return 'session token checkpoint';
   if (event.kind === 'user.message') return 'prompt received';
   if (event.kind === 'session.start') return 'session opened';
   return event.kind;
+}
+
+function replaySessionLastLabel(event: CopilotEventSummary) {
+  if (event.kind === 'tool.execution_start') return `${event.tool || 'tool'} started`;
+  if (event.kind === 'tool.execution_complete') return event.success ? 'tool completed' : 'tool failed';
+  return feedLabel(event);
+}
+
+function replayAgeLabel(timestamp: string, cursorTimeMs: number | null) {
+  if (cursorTimeMs === null) return 'at cursor';
+  const ageS = eventAgeSeconds(timestamp, cursorTimeMs);
+  return ageS === 0 ? 'at cursor' : `${formatAge(ageS)} before cursor`;
+}
+
+function eventBelongsToSession(event: CopilotEventSummary, sessionId: string) {
+  return event.session_id === sessionId
+    || sessionId.startsWith(event.session_id)
+    || event.session_id.startsWith(sessionId);
 }
 
 const PREFS_KEY = 'cmc_prefs';

@@ -571,10 +571,14 @@
     return String(n);
   }
 
+  function exactNumber(value) {
+    return Number(value || 0).toLocaleString();
+  }
+
   function tokenLabel(input, output) {
     var inTok = Number(input || 0);
     var outTok = Number(output || 0);
-    return compactNumberShort(inTok) + '/' + compactNumberShort(outTok);
+    return exactNumber(inTok) + '/' + exactNumber(outTok);
   }
 
   function ageLabel(seconds) {
@@ -641,7 +645,7 @@
 
   function renderWorkMixRows(mix, className) {
     var max = Math.max(1, ...mix.map(function (row) { return row.value || 0; }));
-    return '<div class="cmc-workmix ' + escapeHtml(className || '') + '"><div class="cmc-workmix-title">Recent work mix · last 24h</div>'
+    return '<div class="cmc-workmix ' + escapeHtml(className || '') + '"><div class="cmc-workmix-title">Activity mix</div>'
       + mix.map(function (row) {
         var color = CATEGORY_COLORS[row.category] || '#9aa6c8';
         return '<div class="cmc-work-row"><span>' + escapeHtml(row.label) + '</span><div class="cmc-bar"><span style="--bar-color:' + color + ';width:' + Math.max(8, (row.value / max) * 100) + '%"></span></div><span class="cmc-muted">' + escapeHtml(row.value) + '</span></div>';
@@ -746,7 +750,7 @@
       var outTok = selected.output_tokens || 0;
       var tcalls = (selected.recent_tool_calls || []).length;
       var hasGitRoot = !!selected.git_root;
-      var activity = selectedActivity(selected);
+      var activity = selected.replay_activity || selectedActivity(selected);
       selectedHtml = '<div class="cmc-session-summary">'
         + '<div class="cmc-session-heading">'
         + '<div class="cmc-session-title" title="' + escapeHtml(selected.title || selected.id) + '">' + escapeHtml(selected.title || selected.id) + '</div>'
@@ -809,7 +813,7 @@
     if (!domReplay.querySelector('.cmc-replay-inner')) {
       domReplay.innerHTML = '<div class="cmc-replay-inner">'
         + '<button class="cmc-button" type="button" data-cmc-action="replay-toggle"></button>'
-        + '<div class="cmc-replay-track" data-cmc-action="replay-seek" role="slider" tabindex="0" aria-label="Replay position" aria-valuemin="0"><div class="cmc-replay-rail"><div class="cmc-replay-fill"></div></div><div class="cmc-replay-knob"></div><div class="cmc-replay-status"></div></div>'
+        + '<div class="cmc-replay-track" data-cmc-action="replay-seek" role="slider" tabindex="0" aria-label="Recent activity replay position" aria-valuemin="0"><div class="cmc-replay-rail"><div class="cmc-replay-fill"></div></div><div class="cmc-replay-knob"></div><div class="cmc-replay-status"></div></div>'
         + '<button class="cmc-button" type="button" data-cmc-action="replay-live"></button>'
         + '</div>';
     }
@@ -821,7 +825,7 @@
     var status = domReplay.querySelector('.cmc-replay-status');
     if (toggle) {
       toggle.textContent = replay.paused ? '▶' : '⏸';
-      toggle.setAttribute('aria-label', replay.paused ? 'Resume replay' : 'Pause replay');
+      toggle.setAttribute('aria-label', replay.paused ? 'Resume recent activity replay' : 'Pause recent activity replay');
     }
     if (live) {
       live.textContent = replay.atLive ? 'LIVE' : 'GO LIVE';

@@ -104,7 +104,10 @@ async fn open_in_editor(path: String, scheme: Option<String>) -> Result<(), Stri
     let scheme = scheme.unwrap_or_else(|| "vscode".to_string());
     // Defense-in-depth: reject non-trivial schemes so a malicious
     // renderer build can't smuggle arbitrary protocols.
-    if !scheme.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+') {
+    if !scheme
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '+')
+    {
         return Err(format!("Refusing unsupported editor scheme: {}", scheme));
     }
     let url = format!("{}://file/{}", scheme, path);
@@ -216,7 +219,11 @@ pub fn run() {
             // Build a minimal system tray with Show/Hide and Quit.
             let is_mac = cfg!(target_os = "macos");
             let toggle_label = "Show / Hide Copilot Mission Control";
-            let quit_label = if is_mac { "Quit  (⌘Q)" } else { "Quit  (Ctrl+Q)" };
+            let quit_label = if is_mac {
+                "Quit  (⌘Q)"
+            } else {
+                "Quit  (Ctrl+Q)"
+            };
 
             let toggle_item = MenuItemBuilder::with_id("toggle", toggle_label).build(app)?;
             let quit_item = MenuItemBuilder::with_id("quit", quit_label).build(app)?;
@@ -254,7 +261,11 @@ pub fn run() {
             // macOS: re-show window when the user clicks the dock icon
             // after the window has been hidden.
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
                 if !has_visible_windows {
                     show_window(app);
                 }

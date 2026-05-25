@@ -114,6 +114,11 @@ pub struct AgentSessionSummary {
     /// command output, file paths, or diffs.
     #[serde(default)]
     pub recent_turns: Vec<SessionTurnSummary>,
+    /// Privacy-safe token totals over time. Contains only timestamp plus
+    /// cumulative input/output token counts so replay can move the token
+    /// display without exposing prompt, response, args, paths, or diffs.
+    #[serde(default)]
+    pub token_checkpoints: Vec<SessionTokenCheckpoint>,
 }
 
 #[derive(serde::Serialize, Default, Clone)]
@@ -167,6 +172,13 @@ pub struct SessionTurnSummary {
     pub duration_ms: Option<u64>,
 }
 
+#[derive(serde::Serialize, Default, Clone)]
+pub struct SessionTokenCheckpoint {
+    pub timestamp: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 #[derive(serde::Serialize, Clone)]
 pub struct AgentToolMetric {
     pub name: String,
@@ -184,6 +196,10 @@ pub struct AgentEventSummary {
     pub tool: String,
     pub category: String,
     pub success: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_tokens: Option<u64>,
 }
 
 // ── Provider abstraction ──────────────────────────────────────────────
@@ -253,6 +269,7 @@ const MAX_TOOLS_PER_CATEGORY: usize = 5;
 /// from 18 → 80 so chatty bursts between scans don't drop events that
 /// the renderer's workMixHistory needs to accumulate per category.
 const MAX_RECENT_EVENTS: usize = 80;
+const MAX_SESSION_TOKEN_CHECKPOINTS: usize = 120;
 /// Sessions whose `events.jsonl` has not been touched in this many
 /// seconds are considered stale "ghost" sessions and excluded from
 /// the scan. Without this filter the user's accumulated session-state
@@ -1467,6 +1484,11 @@ fn summarize_events(
         let event_type = event_type.as_str();
         let timestamp =
             string_from_paths(&value, &schema.events.timestamp_paths).unwrap_or_default();
+        if summary.token_checkpoints.is_empty()
+            && (summary.input_tokens > 0 || summary.output_tokens > 0)
+        {
+            push_token_checkpoint(summary, &timestamp);
+        }
 
         summary.event_count += 1;
         let event_category = categorize_event(event_type).to_string();
@@ -1550,6 +1572,8 @@ fn summarize_events(
                 tool: tool_name.clone(),
                 category: category.clone(),
                 success: true,
+                input_tokens: Some(summary.input_tokens),
+                output_tokens: Some(summary.output_tokens),
             });
 
             // Record an in-flight entry in the per-session transcript;
@@ -1600,6 +1624,8 @@ fn summarize_events(
                 tool: "tool complete".to_string(),
                 category: completion_category.to_string(),
                 success,
+                input_tokens: Some(summary.input_tokens),
+                output_tokens: Some(summary.output_tokens),
             });
 
             // Fold the success/duration back into the most-recent tool
@@ -1662,6 +1688,7 @@ fn summarize_events(
             // silently stay at zero anyway.
             if let Some(tokens) = u64_from_paths(&value, &schema.events.output_token_paths) {
                 summary.output_tokens += tokens;
+                push_token_checkpoint(summary, &timestamp);
                 let turn_id = raw_event_turn_id(&value, schema)
                     .map(|id| safe_ref_id("turn", &id))
                     .or_else(|| active_turn_id.clone());
@@ -1686,6 +1713,7 @@ fn summarize_events(
             // earlier portion of a long-running file. See the helper's
             // doc for the cache_read / cache_write semantics.
             apply_token_event(&value, event_type, summary, schema);
+            push_token_checkpoint(summary, &timestamp);
         } else if event_type == schema.events.assistant_turn_start
             || event_type == schema.events.assistant_turn_end
             || event_type == schema.events.user_message
@@ -1727,6 +1755,8 @@ fn summarize_events(
                 tool: String::new(),
                 category: categorize_event(event_type).to_string(),
                 success: true,
+                input_tokens: Some(summary.input_tokens),
+                output_tokens: Some(summary.output_tokens),
             });
         }
     }
@@ -1886,6 +1916,26 @@ fn push_session_tool_call(buf: &mut Vec<SessionToolCall>, call: SessionToolCall)
     if buf.len() > MAX_SESSION_TOOL_CALLS {
         let overflow = buf.len() - MAX_SESSION_TOOL_CALLS;
         buf.drain(0..overflow);
+    }
+}
+
+fn push_token_checkpoint(summary: &mut AgentSessionSummary, timestamp: &str) {
+    let checkpoint = SessionTokenCheckpoint {
+        timestamp: timestamp.to_string(),
+        input_tokens: summary.input_tokens,
+        output_tokens: summary.output_tokens,
+    };
+    if summary.token_checkpoints.last().is_some_and(|last| {
+        last.input_tokens == checkpoint.input_tokens
+            && last.output_tokens == checkpoint.output_tokens
+            && last.timestamp == checkpoint.timestamp
+    }) {
+        return;
+    }
+    summary.token_checkpoints.push(checkpoint);
+    if summary.token_checkpoints.len() > MAX_SESSION_TOKEN_CHECKPOINTS {
+        let overflow = summary.token_checkpoints.len() - MAX_SESSION_TOKEN_CHECKPOINTS;
+        summary.token_checkpoints.drain(0..overflow);
     }
 }
 
@@ -2780,6 +2830,13 @@ mod tests {
         assert_eq!(turn.failure_count, 1);
         assert_eq!(turn.status, "failed");
         assert_eq!(turn.output_tokens, 321);
+        assert_eq!(summary.token_checkpoints.len(), 1);
+        assert_eq!(
+            summary.token_checkpoints[0].timestamp,
+            "2026-01-01T00:00:05.000Z"
+        );
+        assert_eq!(summary.token_checkpoints[0].input_tokens, 0);
+        assert_eq!(summary.token_checkpoints[0].output_tokens, 321);
         assert!(!turn.partial);
         assert_eq!(turn.duration_ms, Some(6000));
         assert_eq!(summary.recent_tool_calls[0].turn_id, turn.id);
@@ -2888,6 +2945,11 @@ mod tests {
         );
         // Output: shutdown's 2M wins over the per-message 1K (max()).
         assert_eq!(summary.output_tokens, 2_000_000);
+        assert_eq!(summary.token_checkpoints.len(), 2);
+        assert_eq!(summary.token_checkpoints[0].input_tokens, 0);
+        assert_eq!(summary.token_checkpoints[0].output_tokens, 1000);
+        assert_eq!(summary.token_checkpoints[1].input_tokens, 10_100_000);
+        assert_eq!(summary.token_checkpoints[1].output_tokens, 2_000_000);
 
         let _ = std::fs::remove_file(&path);
     }
