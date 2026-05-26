@@ -2,7 +2,7 @@ declare const Phaser: any;
 
 import { W, H } from './viewport.js';
 
-type MissionCategory = 'forge' | 'library' | 'terminal' | 'signal' | 'delegates' | 'skills' | 'court' | 'mcp' | 'workshop' | 'complete' | 'alert' | 'thinking' | 'waiting' | 'prompt' | 'arrival' | 'activity';
+type MissionCategory = 'forge' | 'library' | 'terminal' | 'signal' | 'hooks' | 'delegates' | 'skills' | 'court' | 'mcp' | 'workshop' | 'complete' | 'alert' | 'thinking' | 'waiting' | 'prompt' | 'arrival' | 'activity';
 
 interface CopilotToolMetric {
   name: string;
@@ -40,6 +40,7 @@ interface CopilotSessionSummary {
   skills_count?: number;
   court_count?: number;
   mcp_count?: number;
+  hooks_count?: number;
   error_count: number;
   turn_count?: number;
   output_tokens: number;
@@ -75,6 +76,7 @@ interface SessionToolCall {
   completed_at?: string;
   model?: string;
   call_id?: string;
+  event_ref?: string;
   turn_id?: string;
   target?: string;
   details?: SafeDetail[];
@@ -135,7 +137,7 @@ interface SchemaDriftReport {
   hints: string[];
 }
 
-type WorkMixCounts = { read: number; write: number; command: number; web: number; task: number; mcp: number };
+type WorkMixCounts = { read: number; write: number; command: number; web: number; task: number; mcp: number; hooks: number };
 
 interface Quarter {
   key: MissionCategory;
@@ -164,6 +166,7 @@ interface MissionLayout {
   inspectorW: number;
   centerX: number;
   centerY: number;
+  hubY: number;
   radiusX: number;
   radiusY: number;
   quarterR: number;
@@ -201,16 +204,6 @@ interface ArrivalEffect {
 }
 
 type AttentionLevel = 'ok' | 'watch' | 'review';
-
-interface InsightCard {
-  label: string;
-  value: string;
-  sub?: string;
-  /// Optional shorter fallback sub-line used when `sub` doesn't fit
-  /// the card width.
-  subCompact?: string;
-  color?: string;
-}
 
 interface OpsSummary {
   mode: string;
@@ -285,11 +278,16 @@ const QUARTER_TEXTURES: Record<string, string> = {
   library: 'outpost_disc',
   terminal: 'console_wide_teal',
   signal: 'telescope_blue',
+  hooks: 'satellite_cross',
   delegates: 'ship_fighter_blue',
   skills: 'satellite_dish_stand',
   court: 'console_sphere',
   mcp: 'satellite_8panel',
 };
+
+const MISSION_SECTOR_COUNT = 9;
+const CENTER_RING_DOWN_NUDGE_PX = 12;
+const FOCUS_RING_UP_LIFT_PX = 16;
 const CENTER_TEXTURE = 'outpost_domed_island';
 
 /// Single source of truth for quarter hues. Both `buildQuarters` and
@@ -302,6 +300,7 @@ const QUARTER_COLORS: Record<MissionCategory, number> = {
   library: 0xe1ae45,
   terminal: 0x86d4b7,
   signal: 0xc37ee8,
+  hooks: 0x61d6ff,
   delegates: 0xfc60c7,
   skills: 0xda58e0,
   court: 0x2fc5e8,
@@ -319,9 +318,9 @@ const QUARTER_COLORS: Record<MissionCategory, number> = {
   activity: 0x9aa6c8,
 };
 
-/// Vertical offset (px at 1× scale) applied to the four diagonal
-/// quarters so they don't visually crowd the side cardinals (Commands,
-/// Intent). Scaled down with the layout in `buildQuarters`.
+/// Vertical offset (px at 1x scale) applied only when the sector count
+/// is even and produces true side cardinals. Odd-count rings stay on the
+/// ellipse so the visual flow remains evenly centered.
 const DIAGONAL_QUARTER_SHIFT_PX = 22;
 
 /// Minimum hit radius (px) used by `updateHoveredQuarter`. Acts as a
@@ -409,10 +408,6 @@ export class MissionControlScene extends Phaser.Scene {
   private replayPlayTimer = 0;
   private readonly replayPlaybackInterval = 700;
   private readonly replayMaxEvents = 600;
-  /// Rolling 1-min count of tool calls used for the calls/min rate card
-  /// and castle sparkline. Each entry is { ts: ms, count: 1 }; we trim
-  /// to the trailing 10-minute window during render.
-  private toolRateSamples: number[] = [];
   /// Sliding tool-call timestamps split by category for work-mix
   /// sparklines AND the 24h quarter counts. Each entry stores the
   /// event identity key alongside its perfTs so compute24hCategoryCounts
@@ -436,7 +431,6 @@ export class MissionControlScene extends Phaser.Scene {
   public activity: CopilotActivity = createEmptyActivity();
   public quarters: Quarter[] = [];
   public layout: MissionLayout | null = null;
-  public insightCards: InsightCard[] = [];
   public opsSummary: OpsSummary = createOpsSummary('Disconnected', 'watch', 'Run GitHub Copilot CLI to populate activity.', 'No activity loaded yet.');
   public selectedSession: CopilotSessionSummary | null = null;
   public sessionPickerRows: { id: string; x: number; y: number; w: number; h: number }[] = [];
@@ -720,7 +714,6 @@ export class MissionControlScene extends Phaser.Scene {
     this.replayCursor = 0;
     this.replayPaused = false;
     this.replayPlayTimer = 0;
-    this.toolRateSamples = [];
     this.workMixHistory = {};
     this.attentionEntered.clear();
     this.attentionAlertedAt.clear();
@@ -792,7 +785,6 @@ export class MissionControlScene extends Phaser.Scene {
       ? this.quarters[this.hoveredQuarterIndex]?.key ?? null
       : null;
     this.opsSummary = buildOpsSummary(this.activity);
-    this.insightCards = this.buildInsightCards();
     this.pushSelectedModelToNavbar();
 
     this.drawBackground();
@@ -821,9 +813,9 @@ export class MissionControlScene extends Phaser.Scene {
     // needs a small breathing-room margin from the top edge. Keeping
     // opsY/opsH in the layout shape (opsH=0) so downstream readers and
     // the well-bounds math stay unchanged.
-    const opsY = Math.max(12, H * 0.018);
+    const opsY = Math.max(8, H * 0.012);
     const opsH = 0;
-    const topY = opsY + opsH + (compact ? 14 : 22);
+    const topY = opsY + opsH + (compact ? 10 : 14);
 
     const panelW = this.panelsHidden
       ? 0
@@ -867,7 +859,7 @@ export class MissionControlScene extends Phaser.Scene {
     // Tighten the gutters so the ring well grows ~24px vertically; that
     // grows radiusY, spreads N/S buildings further from the castle, and
     // also lifts the ring center up a touch (since wellTop moves up).
-    const wellGutterY = this.panelsHidden ? (compact ? 6 : 8) : (compact ? 12 : 20);
+    const wellGutterY = this.panelsHidden ? (compact ? 6 : 8) : (compact ? 8 : 12);
     const wellLeft = leftX + panelW + wellGutterX;
     const wellRight = W - leftX - wellGutterX;
     const wellTop = opsY + opsH + wellGutterY;
@@ -878,55 +870,89 @@ export class MissionControlScene extends Phaser.Scene {
 
     const centerX = wellLeft + wellW / 2;
 
-    // Quarter sprite half-size. For 8 evenly spaced points on an
-    // ellipse, the worst-case chord between adjacent quarters is
-    // ~0.77 * min(rx, ry). Quarter sprite must be smaller than that
-    // chord to avoid neighbour collisions, so derive sprite size from
-    // the smaller radius rather than from pure scene scale. In focus
-    // mode we lift the absolute cap so the buildings can grow into
-    // the extra horizontal space the hidden side panels left behind;
-    // the chord limit still prevents overlap. The +25% bump is the
-    // largest that keeps the diagonal brackets clear of the cardinal
-    // ones on the bottom-heavy ellipse (labelStackH compensation).
+    // Quarter sprite half-size. Start from the available well, then run
+    // the sector card through the same ring math used for placement.
+    // This matters with 9 sectors: adjacent points are only 40deg apart,
+    // so compact focus-mode windows need smaller cards than the old
+    // 8-sector chord heuristic allowed.
     const rawRadiusX = wellW / 2;
     const rawRadiusY = wellH / 2;
     const minRingRadius = Math.min(rawRadiusX, rawRadiusY);
     const quarterCap = this.panelsHidden ? 80 : 64;
-    const quarterR = Math.max(36, Math.min(quarterCap * s, minRingRadius * 0.42));
-    const quarterSize = quarterR * 2;
+    const startingQuarterR = Math.max(32, Math.min(quarterCap * s, minRingRadius * 0.42));
+    const labelBlockH = Math.round(38 * Math.max(s, 0.85));
+    const minQuarterR = 24;
+    const layoutForQuarterR = (candidateR: number) => {
+      const quarterSize = candidateR * 2;
+      const sectorText = sectorTextMetrics(candidateR);
+      // Keep layout in sync with drawQuarters so larger sector text still
+      // fits inside the bracket frame and ring bounds.
+      const labelStackH = sectorText.labelStackH;
 
-    // Label + count text block below each quarter sprite occupies
-    // ~42*pedestalUnit (halo bottom) + 14 + labelSize + countSize px
-    // (see drawQuarters). Using the same pedestalUnit (quarterR/64)
-    // here as the halo math there means labels follow when focus-mode
-    // grows the sprites.
-    const labelStackH = Math.round(42 * (quarterR / 64) + 14 + Math.max(14, quarterR * 0.22) + Math.max(18, quarterR * 0.26));
+      // The top quarter only needs `quarterR` of clearance above its
+      // center, while bottom labels need `labelStackH`. Shift the
+      // geometric center up by half the asymmetry so the sector ring uses
+      // vertical space evenly.
+      const verticalShift = this.panelsHidden
+        ? Math.max(0, (labelStackH - candidateR) / 2)
+        : Math.max(18, (labelStackH - candidateR) / 2 + 12);
+      const centerDownNudge = Math.round(CENTER_RING_DOWN_NUDGE_PX * Math.max(s, 0.85));
+      const focusModeLift = this.panelsHidden ? Math.round(FOCUS_RING_UP_LIFT_PX * Math.max(s, 0.85)) : 0;
+      const centerY = wellTop + wellH / 2 - verticalShift + centerDownNudge - focusModeLift;
+      const horizontalRadius = Math.max(100, rawRadiusX - candidateR);
+      const frameH = quarterSize + labelBlockH;
+      const cardPadding = Math.max(4, Math.round(4 * Math.max(s, 0.85)));
+      const maxCardRadius = Array.from({ length: MISSION_SECTOR_COUNT }, (_, index) => {
+        const angle = -Math.PI / 2 + (Math.PI * 2 * index) / MISSION_SECTOR_COUNT;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        const bounds: number[] = [];
+        if (cos > 0.001) bounds.push((wellRight - cardPadding - candidateR - centerX) / cos);
+        else if (cos < -0.001) bounds.push((centerX - wellLeft - cardPadding - candidateR) / -cos);
+        if (sin < -0.001) bounds.push((centerY - wellTop - cardPadding - candidateR) / -sin);
+        else if (sin > 0.001) bounds.push((wellBottom - cardPadding + candidateR - frameH - centerY) / sin);
+        return Math.min(...bounds);
+      }).reduce((min, value) => Math.min(min, value), Number.POSITIVE_INFINITY);
+      const radius = Math.max(100, Math.min(horizontalRadius, maxCardRadius));
 
-    // The top quarter (Edits) only needs `quarterR` of clearance
-    // above its center, while the bottom quarter (Agents) needs
-    // `labelStackH` for its label stack. That asymmetry wastes vertical
-    // space when we use the smaller of the two for radiusY. Instead,
-    // shift the ring's geometric center UP by half the asymmetry so
-    // the top and bottom clearance requirements balance — radiusY can
-    // then grow to use the freed space. In the normal layout we add a
-    // small extra lift so the bottom sector panel has breathing room
-    // when its footer wraps.
-    const verticalShift = this.panelsHidden
-      ? Math.max(0, (labelStackH - quarterR) / 2)
-      : Math.max(18, (labelStackH - quarterR) / 2 + 12);
-    const centerY = wellTop + wellH / 2 - verticalShift;
-
-    const radiusY = this.panelsHidden
-      ? Math.max(100, rawRadiusY - (labelStackH + quarterR) / 2)
-      : Math.max(100, rawRadiusY - Math.max(quarterR, labelStackH));
-
-    // The map well is wider than tall now that the right column is gone,
-    // so an unconstrained radiusX spreads the diagonal sectors too far
-    // from the top/bottom sectors. Cap radiusX so the ring reads as one
-    // connected cluster instead of a stretched oval.
-    const radiusXCap = radiusY * (this.panelsHidden ? 1.4 : 1.42);
-    const radiusX = Math.max(120, Math.min(rawRadiusX - quarterR, radiusXCap));
-    const topLift = Math.min(quarterR * 0.6, Math.max(0, wellTop - opsY - opsH - quarterR * 1.4));
+      return {
+        centerY,
+        radiusX: radius,
+        radiusY: radius,
+        quarterR: candidateR,
+        quarterSize,
+        topLift: 0,
+      };
+    };
+    const hasSectorCardOverlap = (candidate: ReturnType<typeof layoutForQuarterR>) => {
+      const frameH = candidate.quarterSize + labelBlockH;
+      const gap = Math.max(4, Math.round(6 * Math.max(s, 0.85)));
+      const rects = Array.from({ length: MISSION_SECTOR_COUNT }, (_, index) => {
+        const angle = -Math.PI / 2 + (Math.PI * 2 * index) / MISSION_SECTOR_COUNT;
+        const x = centerX + Math.cos(angle) * candidate.radiusX;
+        const y = candidate.centerY + Math.sin(angle) * candidate.radiusY;
+        return {
+          left: x - candidate.quarterR,
+          right: x + candidate.quarterR,
+          top: y - candidate.quarterR,
+          bottom: y - candidate.quarterR + frameH,
+        };
+      });
+      for (let i = 0; i < rects.length; i++) {
+        for (let j = i + 1; j < rects.length; j++) {
+          const xOverlap = Math.min(rects[i].right, rects[j].right) - Math.max(rects[i].left, rects[j].left);
+          const yOverlap = Math.min(rects[i].bottom, rects[j].bottom) - Math.max(rects[i].top, rects[j].top);
+          if (xOverlap > -gap && yOverlap > -gap) return true;
+        }
+      }
+      return false;
+    };
+    let fitted = layoutForQuarterR(startingQuarterR);
+    while (fitted.quarterR > minQuarterR && hasSectorCardOverlap(fitted)) {
+      fitted = layoutForQuarterR(Math.max(minQuarterR, fitted.quarterR - 2));
+    }
+    const { centerY, radiusX, radiusY, quarterR, quarterSize, topLift } = fitted;
+    const hubY = centerY + labelBlockH / 2;
 
     return {
       s, compact,
@@ -935,7 +961,7 @@ export class MissionControlScene extends Phaser.Scene {
       replayH, replayY,
       bottomH, bottomY,
       inspectorX, inspectorW,
-      centerX, centerY,
+      centerX, centerY, hubY,
       radiusX, radiusY, quarterR, quarterSize, topLift,
     };
   }
@@ -950,33 +976,31 @@ export class MissionControlScene extends Phaser.Scene {
       { key: 'library', label: 'Library', short: 'Reads' },
       { key: 'terminal', label: 'Terminal Keep', short: 'Commands' },
       { key: 'signal', label: 'Signal Tower', short: 'Web/Docs' },
+      { key: 'hooks', label: 'Hook Relay', short: 'Hooks' },
       { key: 'delegates', label: 'Guild Hall', short: 'Sub-Agents' },
       { key: 'skills', label: 'Tome Hall', short: 'Skills' },
       { key: 'court', label: 'Royal Court', short: 'Intent' },
       { key: 'mcp', label: 'Envoy House', short: 'MCP' },
     ];
 
-    // Even 45° spacing keeps the ring a true circle around the castle
-    // — cos is preserved so the horizontal positions stay symmetric.
-    // We then nudge ONLY the four diagonals vertically: upper diagonals
-    // (Reads, MCP) shift up, lower diagonals (Web/Docs, Skills) shift
-    // down. This opens a visible vertical gap between the diagonals and
-    // the side quarters (Commands, Intent) at sin=0 so their labels
-    // and brackets don't visually crowd each other. Cardinal positions
-    // (top/bottom/sides) stay on the geometric circle.
+    // Even angular spacing keeps the sector flow circular around the
+    // castle. For even-count rings the sectors include true side
+    // cardinals, so diagonal sectors get a small vertical nudge to avoid
+    // label crowding. Odd-count rings skip the nudge so the ellipse stays
+    // balanced instead of shifting most sectors off the ring.
     const diagonalShift = Math.round(DIAGONAL_QUARTER_SHIFT_PX * Math.max(s, 0.85));
+    const shouldShiftDiagonals = specs.length % 2 === 0;
 
     return specs.map((spec, index) => {
       const angle = -Math.PI / 2 + (Math.PI * 2 * index) / specs.length;
-      const lift = index === 0 ? topLift : 0;
       const sinA = Math.sin(angle);
-      const isDiagonal = Math.abs(sinA) > 0.1 && Math.abs(sinA) < 0.95;
+      const isDiagonal = shouldShiftDiagonals && Math.abs(sinA) > 0.1 && Math.abs(sinA) < 0.95;
       const diagY = isDiagonal ? Math.sign(sinA) * diagonalShift : 0;
       return {
         ...spec,
         color: QUARTER_COLORS[spec.key as MissionCategory] ?? 0x9aa6c8,
         x: centerX + Math.cos(angle) * radiusX,
-        y: centerY + sinA * radiusY - lift + diagY,
+        y: centerY + sinA * radiusY + diagY,
         count: counts.get(spec.key) ?? 0,
       };
     });
@@ -989,6 +1013,7 @@ export class MissionControlScene extends Phaser.Scene {
       ['library', session?.read_count ?? 0],
       ['terminal', session?.command_count ?? 0],
       ['signal', session?.web_count ?? 0],
+      ['hooks', session?.hooks_count ?? 0],
       ['delegates', session?.delegates_count ?? session?.task_count ?? 0],
       ['skills', session?.skills_count ?? 0],
       ['court', session?.court_count ?? 0],
@@ -1044,30 +1069,6 @@ export class MissionControlScene extends Phaser.Scene {
     return counts;
   }
 
-  private buildInsightCards(): InsightCard[] {
-    const callsPerMin = this.computeToolCallsPerMin();
-    const light = theme.mode === 'light';
-    // Bright dark-theme tones become hard to read on a white card in
-    // light mode, so swap to darker AA-safe variants.
-    const greenAccent = light ? '#1a7a3a' : '#60ff9a';
-    const cyanAccent = light ? '#0a5a96' : '#61d6ff';
-    return [
-      { label: 'Active', value: String(this.activity.active_sessions), sub: `${this.activity.scanned_sessions} scanned`, color: this.activity.active_sessions > 0 ? greenAccent : theme.muted },
-      { label: 'Tools/min', value: callsPerMin > 0 ? callsPerMin.toFixed(callsPerMin < 10 ? 1 : 0) : '0', sub: `${this.activity.total_tool_calls} total`, color: callsPerMin > 0 ? cyanAccent : theme.muted },
-    ];
-  }
-
-  /// Trim the rate sample buffer to the trailing 60s window and return
-  /// the count. Used as the "calls/min" insight card and the castle
-  /// rate label.
-  private computeToolCallsPerMin(): number {
-    const cutoff = performance.now() - 60_000;
-    while (this.toolRateSamples.length > 0 && this.toolRateSamples[0] < cutoff) {
-      this.toolRateSamples.shift();
-    }
-    return this.toolRateSamples.length;
-  }
-
   private drawBackground() {
     if (theme.mode === 'light') {
       // Subtle light parallax: a near-white wash with very faint bands so
@@ -1094,15 +1095,10 @@ export class MissionControlScene extends Phaser.Scene {
 
   private drawQuarters() {
     const layout = this.layout!;
-    const { centerX, centerY, s, quarterSize, quarterR } = layout;
+    const { centerX, hubY, s, quarterSize, quarterR } = layout;
     const labelBlockH = Math.round(38 * Math.max(s, 0.85));
     const frameH = quarterSize + labelBlockH;
-    const topQuarter = this.quarters.find(q => q.key === 'forge');
-    const bottomQuarter = this.quarters.find(q => q.key === 'delegates');
-    const castleY = topQuarter && bottomQuarter
-      ? ((topQuarter.y - quarterSize / 2 + frameH) + (bottomQuarter.y - quarterSize / 2)) / 2
-      : centerY;
-    this.drawCastle(centerX, castleY, s);
+    this.drawCastle(centerX, hubY, s);
 
     // Find which quarter the inspector is currently showing so the
     // thick "focused" bracket can track it. Live hover always wins;
@@ -1162,8 +1158,9 @@ export class MissionControlScene extends Phaser.Scene {
         .setAlpha(focused ? 1 : 0.9);
       sprite.setDisplaySize(fit.w, fit.h);
       this.textObjects.push(sprite);
-      const labelSize = Math.max(10, Math.round(size * 0.1));
-      const countSize = Math.max(13, Math.round(size * 0.13));
+      const sectorText = sectorTextMetrics(quarterR);
+      const labelSize = sectorText.labelSize;
+      const countSize = sectorText.countSize;
       // Place the label just below the visible halo (which now scales
       // with quarterR via pedestalUnit) with a small breathing gap so
       // text never overlaps the disc.
@@ -1218,9 +1215,13 @@ export class MissionControlScene extends Phaser.Scene {
     // the ring (`moatR + quarterR + gap <= min(radiusX, radiusY)`)
     // so the moat never touches a cardinal quarter on small screens.
     const quarterRingGap = 28;
-    const ringHalf = layout ? Math.min(layout.radiusX, layout.radiusY) : 0;
+    const nearestSectorClearance = layout && this.quarters.length > 0
+      ? Math.min(...this.quarters.map(quarter => Math.hypot(quarter.x - x, quarter.y - y) - layout.quarterR))
+      : layout
+        ? Math.min(layout.radiusX, layout.radiusY) - layout.quarterR
+        : Infinity;
     const moatHeadroom = layout
-      ? Math.max(60, ringHalf - layout.quarterR - quarterRingGap) / 132
+      ? Math.max(60, nearestSectorClearance - quarterRingGap) / 132
       : Infinity;
     // Focus mode lifts the absolute cap so the castle can grow into
     // the larger ring without being dwarfed by the now-bigger
@@ -1319,13 +1320,6 @@ export class MissionControlScene extends Phaser.Scene {
     const quarter = this.activeInspectedQuarter();
     if (!quarter) return null;
     const quarterStats = this.computeQuarterStats(quarter.key);
-    const selected = this.selectedSession;
-    const flagged = selected && errorOrReview(selected);
-    const quarterFooter = selected
-      ? flagged
-        ? `! ${truncate(selected.title || selected.id, 28)} — ${selected.last_tool || 'tool'} failed ${formatAge(selected.stale_seconds)} ago`
-        : `Selected: ${truncate(selected.title || selected.id, 28)} · ${selected.status}`
-      : '';
     return {
       category: quarter.key,
       color: colorToCss(quarter.color),
@@ -1333,8 +1327,6 @@ export class MissionControlScene extends Phaser.Scene {
       countLine: `${quarter.count} selected-session ${quarter.short.toLowerCase()} signals`,
       line: quarterStats.line,
       toolList: quarterStats.toolList ?? '',
-      footer: quarterFooter,
-      footerAlert: Boolean(flagged),
     };
   }
 
@@ -1372,7 +1364,6 @@ export class MissionControlScene extends Phaser.Scene {
     const cursor = this.replayCursor;
     const atLive = this.isAtLive();
     const visibleLog = this.eventLog.slice(0, cursor);
-    const futureLog = this.eventLog.slice(cursor);
     const cursorEvent = visibleLog[visibleLog.length - 1];
     const cursorTimeMs = eventTimestampMs(cursorEvent?.timestamp);
     const feedAnchorMs = atLive ? Date.now() : (cursorTimeMs ?? Date.now());
@@ -1389,7 +1380,6 @@ export class MissionControlScene extends Phaser.Scene {
         success: event.success,
       }));
     const quarter = this.buildQuarterView();
-    const work = atLive ? workMix(this.activity) : projectedWorkMix(this.activity.sessions, futureLog);
     const cursorLabel = cursorEvent ? ` · ${formatEventClock(cursorEvent.timestamp)}` : '';
     const replayStatus = total === 0
       ? 'Recent activity replay · waiting for events'
@@ -1423,26 +1413,12 @@ export class MissionControlScene extends Phaser.Scene {
         replayW: W - layout.leftX * 2,
         replayH: layout.replayH,
       },
-      summary: {
-        cards: this.insightCards,
-        workMix: [
-          { label: 'Read', value: work.read, category: 'library' },
-          { label: 'Edit', value: work.write, category: 'forge' },
-          { label: 'Cmd', value: work.command, category: 'terminal' },
-          { label: 'Web', value: work.web, category: 'signal' },
-          { label: 'Agent', value: work.task, category: 'delegates' },
-          { label: 'MCP', value: work.mcp, category: 'mcp' },
-        ],
-      },
       schemaDrift: this.activity.schema_drift ?? [],
       sessions: {
         header: activeOptions.length > 0 ? `Running sessions (${activeOptions.length})` : 'Recent sessions (none active)',
         rows: this.sessionPickerRows,
         idleCount: Math.max(0, sessionOptions.length - pickerOptions.length),
         options: sessionOptions.map(({ session, index }) => {
-          const mix = atLive
-            ? sessionSnapshotMix(session)
-            : projectedSessionMix(session, futureLog);
           return {
             id: session.id,
             index,
@@ -1450,7 +1426,6 @@ export class MissionControlScene extends Phaser.Scene {
             shortId: session.id.length > 8 ? session.id.slice(0, 8) : session.id,
             status: session.status,
             isActive: session.is_active,
-            mix,
           };
         }),
         selected: selectedSessionView,
@@ -1593,15 +1568,15 @@ export class MissionControlScene extends Phaser.Scene {
       this.seenEventKeys.add(key);
       this.eventLog.push(event);
       appended.push(event);
-      // Track rolling rates/histories. Both buffers self-trim during
-      // render so unbounded growth is impossible. The live entry's key
+      // Track rolling histories. The buffer self-trims during render so
+      // unbounded growth is impossible. The live entry's key
       // matches the per-session snapshot's dedupe format so
       // compute24hCategoryCounts can merge the two sources without
       // double-counting overlap.
-      if (event.kind === 'tool.execution_start') {
-        this.toolRateSamples.push(nowMs);
-        const bucket = (this.workMixHistory[event.category] ??= []);
-        bucket.push({ key: `${event.timestamp}|${event.tool}|${event.category}`, perfTs: nowMs });
+      const quarterKey = quarterKeyForEvent(event);
+      if (quarterKey && (event.kind === 'tool.execution_start' || event.kind === 'hook.start')) {
+        const bucket = (this.workMixHistory[quarterKey] ??= []);
+        bucket.push({ key: `${event.timestamp}|${event.tool}|${quarterKey}`, perfTs: nowMs });
       }
       // Turn-end chime: one per session, debounced by timestamp so a
       // re-render of the same event doesn't replay the sound.
@@ -1720,12 +1695,10 @@ export class MissionControlScene extends Phaser.Scene {
 
   private queueEventPulse(event: CopilotEventSummary, source: 'live' | 'replay' = 'live', delay = 0) {
     // Pulses must be in lock-step with workMixHistory so the count and
-    // the visible flow agree. workMixHistory only increments for
-    // tool.execution_start, so we only pulse for tool.execution_start.
-    // Completion events (success "complete" and failure "alert") still
-    // show up in the Activity Feed but no longer fabricate a building
-    // animation that the count can't justify.
-    if (event.kind !== 'tool.execution_start') return;
+    // the visible flow agree. Only start events increment the visible
+    // work mix, so completion events still appear in the Activity Feed
+    // without fabricating a building animation.
+    if (event.kind !== 'tool.execution_start' && event.kind !== 'hook.start') return;
     const quarterKey = quarterKeyForEvent(event);
     if (!quarterKey) return;
     const quarter = this.quarters.find(d => d.key === quarterKey);
@@ -2216,18 +2189,7 @@ function detectConcreteOpsSignal(activity: CopilotActivity): OpsSummary | null {
 }
 
 function createEmptyWorkMix(): WorkMixCounts {
-  return { read: 0, write: 0, command: 0, web: 0, task: 0, mcp: 0 };
-}
-
-function sessionSnapshotMix(session: CopilotSessionSummary): WorkMixCounts {
-  return {
-    read: session.read_count ?? 0,
-    write: session.write_count ?? 0,
-    command: session.command_count ?? 0,
-    web: session.web_count ?? 0,
-    task: session.task_count ?? 0,
-    mcp: session.mcp_count ?? 0,
-  };
+  return { read: 0, write: 0, command: 0, web: 0, task: 0, mcp: 0, hooks: 0 };
 }
 
 function workMix(activity: CopilotActivity): WorkMixCounts {
@@ -2239,53 +2201,10 @@ function workMix(activity: CopilotActivity): WorkMixCounts {
       web: mix.web + session.web_count,
       task: mix.task + session.task_count,
       mcp: mix.mcp + (session.mcp_count ?? 0),
+      hooks: mix.hooks + (session.hooks_count ?? 0),
     }),
     createEmptyWorkMix(),
   );
-}
-
-function projectedSessionMix(session: CopilotSessionSummary, futureEvents: CopilotEventSummary[]): WorkMixCounts {
-  const mix = sessionSnapshotMix(session);
-  for (const event of futureEvents) {
-    if (event.kind !== 'tool.execution_start' || !eventBelongsToSession(event, session.id)) continue;
-    const key = workMixKeyForCategory(event.category);
-    if (!key) continue;
-    mix[key] = Math.max(0, mix[key] - 1);
-  }
-  return mix;
-}
-
-function projectedWorkMix(sessions: CopilotSessionSummary[], futureEvents: CopilotEventSummary[]): WorkMixCounts {
-  return sessions.reduce((mix, session) => {
-    const sessionMix = projectedSessionMix(session, futureEvents);
-    return {
-      read: mix.read + sessionMix.read,
-      write: mix.write + sessionMix.write,
-      command: mix.command + sessionMix.command,
-      web: mix.web + sessionMix.web,
-      task: mix.task + sessionMix.task,
-      mcp: mix.mcp + sessionMix.mcp,
-    };
-  }, createEmptyWorkMix());
-}
-
-function workMixFromEvents(events: CopilotEventSummary[]): WorkMixCounts {
-  return events.reduce((mix, event) => {
-    if (event.kind !== 'tool.execution_start') return mix;
-    const key = workMixKeyForCategory(event.category);
-    if (!key) return mix;
-    return { ...mix, [key]: mix[key] + 1 };
-  }, createEmptyWorkMix());
-}
-
-function workMixKeyForCategory(category: string): keyof WorkMixCounts | null {
-  if (category === 'library') return 'read';
-  if (category === 'forge') return 'write';
-  if (category === 'terminal') return 'command';
-  if (category === 'signal') return 'web';
-  if (category === 'mcp') return 'mcp';
-  if (category === 'delegates' || category === 'skills' || category === 'court') return 'task';
-  return null;
 }
 
 function dominantWork(mix: ReturnType<typeof workMix>) {
@@ -2305,10 +2224,10 @@ function createDemoActivity(): CopilotActivity {
     total_tool_calls: 140,
     total_output_tokens: 24380,
     sessions: [
-      { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 128, tool_count: 55, write_count: 16, read_count: 22, command_count: 10, web_count: 3, task_count: 4, delegates_count: 4, skills_count: 0, court_count: 4, error_count: 0, output_tokens: 9800, last_tool: 'apply_patch', last_event_category: 'forge' },
-      { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 96, tool_count: 42, write_count: 5, read_count: 14, command_count: 18, web_count: 0, task_count: 5, delegates_count: 3, skills_count: 2, court_count: 1, error_count: 2, output_tokens: 6120, last_tool: 'bash', last_event_category: 'alert' },
-      { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: true, status: 'thinking', event_count: 74, tool_count: 28, write_count: 1, read_count: 11, command_count: 1, web_count: 13, task_count: 2, delegates_count: 2, skills_count: 0, court_count: 0, error_count: 0, output_tokens: 5450, last_tool: 'web_fetch', last_event_category: 'signal' },
-      { id: 'delta321', title: 'Plan Refactor', repository: 'copilot-mission-control', branch: 'feature/mission', updated_at: '', is_active: false, status: 'idle', event_count: 62, tool_count: 15, write_count: 2, read_count: 8, command_count: 1, web_count: 1, task_count: 3, delegates_count: 3, skills_count: 0, court_count: 0, error_count: 0, output_tokens: 3010, last_tool: 'task', last_event_category: 'delegates' },
+      { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 128, tool_count: 55, write_count: 16, read_count: 22, command_count: 10, web_count: 3, task_count: 4, delegates_count: 4, skills_count: 0, court_count: 4, mcp_count: 0, hooks_count: 2, error_count: 0, output_tokens: 9800, last_tool: 'apply_patch', last_event_category: 'forge' },
+      { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 96, tool_count: 42, write_count: 5, read_count: 14, command_count: 18, web_count: 0, task_count: 5, delegates_count: 3, skills_count: 2, court_count: 1, mcp_count: 0, hooks_count: 1, error_count: 2, output_tokens: 6120, last_tool: 'bash', last_event_category: 'alert' },
+      { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: true, status: 'thinking', event_count: 74, tool_count: 28, write_count: 1, read_count: 11, command_count: 1, web_count: 13, task_count: 2, delegates_count: 2, skills_count: 0, court_count: 0, mcp_count: 0, hooks_count: 3, error_count: 0, output_tokens: 5450, last_tool: 'web_fetch', last_event_category: 'signal' },
+      { id: 'delta321', title: 'Plan Refactor', repository: 'copilot-mission-control', branch: 'feature/mission', updated_at: '', is_active: false, status: 'idle', event_count: 62, tool_count: 15, write_count: 2, read_count: 8, command_count: 1, web_count: 1, task_count: 3, delegates_count: 3, skills_count: 0, court_count: 0, mcp_count: 0, hooks_count: 0, error_count: 0, output_tokens: 3010, last_tool: 'task', last_event_category: 'delegates' },
     ],
     tools: [
       { name: 'view', category: 'library', count: 33 },
@@ -2336,6 +2255,7 @@ function createDemoEvent(index: number, timestampMs = Date.now()): CopilotEventS
     { session_id: 'alpha123', kind: 'tool.execution_start', tool: 'apply_patch', category: 'forge', success: true },
     { session_id: 'beta4567', kind: 'tool.execution_start', tool: 'bash', category: 'terminal', success: true },
     { session_id: 'gamma890', kind: 'tool.execution_start', tool: 'web_fetch', category: 'signal', success: true },
+    { session_id: 'alpha123', kind: 'hook.start', tool: 'postToolUse', category: 'hooks', success: true },
     { session_id: 'delta321', kind: 'tool.execution_start', tool: 'task', category: 'delegates', success: true },
     { session_id: 'alpha123', kind: 'user.message', tool: 'prompt', category: 'court', success: true },
     { session_id: 'beta4567', kind: 'tool.execution_complete', tool: 'bash', category: 'alert', success: false },
@@ -2379,6 +2299,7 @@ function applyDemoEvent(activity: CopilotActivity, event: CopilotEventSummary): 
       skills_count: quarterKey === 'skills' ? (session.skills_count ?? 0) + 1 : (session.skills_count ?? 0),
       court_count: quarterKey === 'court' ? (session.court_count ?? 0) + 1 : (session.court_count ?? 0),
       mcp_count: quarterKey === 'mcp' ? (session.mcp_count ?? 0) + 1 : (session.mcp_count ?? 0),
+      hooks_count: quarterKey === 'hooks' ? (session.hooks_count ?? 0) + 1 : (session.hooks_count ?? 0),
       error_count: event.success ? session.error_count : session.error_count + 1,
       output_tokens: session.output_tokens + 120,
       last_tool: event.tool,
@@ -2427,7 +2348,7 @@ function eventKey(event: CopilotEventSummary) {
 
 function quarterKeyForEvent(event: CopilotEventSummary): MissionCategory | null {
   const category = event.category;
-  if (category === 'forge' || category === 'library' || category === 'terminal' || category === 'signal' || category === 'delegates' || category === 'skills' || category === 'court' || category === 'mcp') {
+  if (category === 'forge' || category === 'library' || category === 'terminal' || category === 'signal' || category === 'hooks' || category === 'delegates' || category === 'skills' || category === 'court' || category === 'mcp') {
     return category;
   }
   if (category === 'alert') return 'terminal';
@@ -2496,6 +2417,18 @@ function sceneScale() {
   return clamp(Math.min(W / 1920, H / 1080) * 1.24, 0.88, 1.45);
 }
 
+function sectorTextMetrics(quarterR: number) {
+  const quarterSize = quarterR * 2;
+  const pedestalUnit = quarterR / 64;
+  const labelSize = Math.max(12, Math.round(quarterSize * 0.115));
+  const countSize = Math.max(16, Math.round(quarterSize * 0.16));
+  return {
+    labelSize,
+    countSize,
+    labelStackH: Math.round(42 * pedestalUnit + 14 + labelSize + countSize),
+  };
+}
+
 function compactNumber(value: number) {
   if (value >= 1_000_000) return `${Math.round(value / 100_000) / 10}m`;
   if (value >= 1_000) return `${Math.round(value / 100) / 10}k`;
@@ -2558,6 +2491,8 @@ function formatEventClock(timestamp: string) {
 function feedLabel(event: CopilotEventSummary) {
   if (event.kind === 'tool.execution_start') return event.tool || 'tool started';
   if (event.kind === 'tool.execution_complete') return event.success ? 'tool completed' : 'tool failed';
+  if (event.kind === 'hook.start') return `${event.tool || 'hook'} hook started`;
+  if (event.kind === 'hook.end') return event.success ? `${event.tool || 'hook'} hook completed` : `${event.tool || 'hook'} hook failed`;
   if (event.kind === 'assistant.turn_start') return 'Copilot started thinking';
   if (event.kind === 'assistant.turn_end') return 'Copilot is waiting';
   if (event.kind === 'assistant.message') return 'token update';
@@ -2571,6 +2506,8 @@ function feedLabel(event: CopilotEventSummary) {
 function replaySessionLastLabel(event: CopilotEventSummary) {
   if (event.kind === 'tool.execution_start') return `${event.tool || 'tool'} started`;
   if (event.kind === 'tool.execution_complete') return event.success ? 'tool completed' : 'tool failed';
+  if (event.kind === 'hook.start') return `${event.tool || 'hook'} hook started`;
+  if (event.kind === 'hook.end') return event.success ? `${event.tool || 'hook'} hook completed` : `${event.tool || 'hook'} hook failed`;
   return feedLabel(event);
 }
 

@@ -103,6 +103,11 @@ pub struct AgentSessionSummary {
     /// dedicated quarter in the renderer.
     #[serde(default)]
     pub mcp_count: usize,
+    /// Copilot CLI hook callbacks (sessionStart, postToolUse, agentStop,
+    /// etc.). Hook inputs/outputs are never surfaced; this is a count
+    /// and sanitized transcript marker only.
+    #[serde(default)]
+    pub hooks_count: usize,
     pub error_count: usize,
     /// Count of assistant.turn_start events for this session. Lets the
     /// renderer surface a "turns" metric (one turn = one model round
@@ -159,6 +164,8 @@ pub struct SessionToolCall {
     #[serde(default)]
     pub call_id: String,
     #[serde(default)]
+    pub event_ref: String,
+    #[serde(default)]
     pub turn_id: String,
     #[serde(default)]
     pub target: String,
@@ -174,6 +181,14 @@ pub struct SessionToolCall {
 pub struct SafeDetail {
     pub label: String,
     pub value: String,
+}
+
+#[derive(serde::Serialize, Default)]
+pub struct RawToolCallDetails {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_args: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_output: Option<String>,
 }
 
 #[derive(serde::Serialize, Default, Clone)]
@@ -328,6 +343,8 @@ struct ProviderSchema {
     workspace: WorkspaceSchema,
     events: EventsSchema,
     #[serde(default)]
+    hooks: HookConfigSchema,
+    #[serde(default)]
     token_events: Vec<TokenEventSchema>,
     #[serde(default)]
     tool_identity_rules: Vec<ToolIdentityRule>,
@@ -360,15 +377,33 @@ struct EventsSchema {
     user_message: String,
     session_start: String,
     #[serde(default)]
+    hook_start: String,
+    #[serde(default)]
+    hook_complete: String,
+    #[serde(default)]
     ignore_as_last_event: Vec<String>,
     timestamp_paths: Vec<String>,
     model_paths: Vec<String>,
     tool_name_paths: Vec<String>,
     arguments_paths: Vec<String>,
+    #[serde(default)]
+    output_paths: Vec<String>,
     success_paths: Vec<String>,
     output_token_paths: Vec<String>,
     turn_id_paths: Vec<String>,
     tool_call_id_paths: Vec<String>,
+    #[serde(default)]
+    hook_name_paths: Vec<String>,
+    #[serde(default)]
+    hook_invocation_id_paths: Vec<String>,
+}
+
+#[derive(serde::Deserialize, Clone, Default)]
+struct HookConfigSchema {
+    #[serde(default)]
+    config_path: Vec<String>,
+    #[serde(default)]
+    hook_types_path: String,
 }
 
 #[derive(serde::Deserialize, Clone)]
@@ -763,6 +798,11 @@ fn validate_provider_schema(schema: &ProviderSchema) -> Result<(), String> {
         "arguments",
     )?;
     validate_arguments_paths(&schema.events.arguments_paths)?;
+    validate_path_suffixes(
+        &schema.events.output_paths,
+        &["output", "result", "error"],
+        "output",
+    )?;
     validate_path_suffixes(&schema.events.success_paths, &["success"], "success")?;
     validate_path_suffixes(
         &schema.events.output_token_paths,
@@ -779,6 +819,24 @@ fn validate_provider_schema(schema: &ProviderSchema) -> Result<(), String> {
         &["toolCallId", "tool_call_id"],
         "tool call id",
     )?;
+    validate_path_suffixes(
+        &schema.events.hook_name_paths,
+        &["hookType", "hook_type"],
+        "hook type",
+    )?;
+    validate_path_suffixes(
+        &schema.events.hook_invocation_id_paths,
+        &["hookInvocationId", "hook_invocation_id"],
+        "hook invocation id",
+    )?;
+    if !schema.hooks.hook_types_path.is_empty()
+        && !is_safe_surface_path(&schema.hooks.hook_types_path)
+    {
+        return Err(format!(
+            "unsafe hook types path '{}'",
+            schema.hooks.hook_types_path
+        ));
+    }
     for token in &schema.token_events {
         if !matches!(token.mode.as_str(), "additive" | "cumulative_max") {
             return Err(format!("unsupported token mode '{}'", token.mode));
@@ -826,7 +884,15 @@ fn validate_provider_schema(schema: &ProviderSchema) -> Result<(), String> {
 fn is_known_tool_category(category: &str) -> bool {
     matches!(
         category,
-        "forge" | "library" | "terminal" | "signal" | "delegates" | "skills" | "court" | "mcp"
+        "forge"
+            | "library"
+            | "terminal"
+            | "signal"
+            | "hooks"
+            | "delegates"
+            | "skills"
+            | "court"
+            | "mcp"
     )
 }
 
@@ -1115,6 +1181,7 @@ fn scan_copilot() -> ProviderScan {
 
     // Load once per scan; reused for every tool execution event below.
     let mcp_allowlist = load_mcp_tool_allowlist(&schema);
+    let configured_hook_types = load_configured_hook_types(&schema);
     let mut schema_drift = SchemaDriftAccumulator::new(provider, &schema.schema_version);
 
     let now = SystemTime::now();
@@ -1165,6 +1232,7 @@ fn scan_copilot() -> ProviderScan {
             &mut scan.tool_counts,
             &mut scan.recent_events,
             &mcp_allowlist,
+            &configured_hook_types,
             &schema,
         );
         schema_drift.record_session(&summary, &session_schema_stats);
@@ -1177,7 +1245,8 @@ fn scan_copilot() -> ProviderScan {
         // act on. If we add real attention signals later (permission
         // requests, session.error events, model failures), wire those
         // here instead.
-        summary.status = if summary.is_active && summary.tool_count > 0 {
+        summary.status = if summary.is_active && (summary.tool_count > 0 || summary.hooks_count > 0)
+        {
             "working".to_string()
         } else if summary.is_active {
             "thinking".to_string()
@@ -1279,7 +1348,8 @@ impl SchemaDriftAccumulator {
         let missing_event_type_ratio = stats.missing_event_type as f64 / stats.total_events as f64;
         let unknown_ratio =
             stats.unknown_event_types.values().sum::<usize>() as f64 / stats.total_events as f64;
-        let tool_counts_missing = summary.event_count >= 25 && summary.tool_count == 0;
+        let tool_counts_missing =
+            summary.event_count >= 25 && summary.tool_count == 0 && summary.hooks_count == 0;
         let event_type_missing = stats.total_events >= 25 && missing_event_type_ratio >= 0.75;
         let many_unknown_events = stats.total_events >= 25 && unknown_ratio >= 0.5;
 
@@ -1350,6 +1420,8 @@ fn is_schema_known_event(event_type: &str, schema: &ProviderSchema) -> bool {
         || event_type == schema.events.assistant_turn_end
         || event_type == schema.events.user_message
         || event_type == schema.events.session_start
+        || (!schema.events.hook_start.is_empty() && event_type == schema.events.hook_start)
+        || (!schema.events.hook_complete.is_empty() && event_type == schema.events.hook_complete)
         || schema
             .events
             .ignore_as_last_event
@@ -1536,6 +1608,7 @@ struct PendingToolStart {
     category: String,
     tool: String,
     call_id: String,
+    event_ref: String,
     turn_id: String,
 }
 
@@ -1623,6 +1696,7 @@ fn summarize_events(
     tool_counts: &mut BTreeMap<(String, String), usize>,
     recent_events: &mut Vec<AgentEventSummary>,
     mcp_allowlist: &HashSet<String>,
+    configured_hook_types: &HashSet<String>,
     schema: &ProviderSchema,
 ) -> SessionSchemaStats {
     let mut schema_stats = SessionSchemaStats::default();
@@ -1651,27 +1725,41 @@ fn summarize_events(
     // at compaction or shutdown). The head scan is cheap because we
     // substring-filter lines before JSON-parsing, so only the ~1 in
     // 4 MB of lines that actually contain a token event get parsed.
+    let mut read_offset = 0;
     if file_len > MAX_READ_BYTES {
         if let Ok(head_file) = fs::File::open(path) {
             let head_reader = BufReader::new(head_file.take(file_len - MAX_READ_BYTES));
             fold_skipped_token_events(head_reader, summary, schema);
         }
-        let _ = file.seek(SeekFrom::Start(file_len - MAX_READ_BYTES));
+        read_offset = file_len - MAX_READ_BYTES;
+        let _ = file.seek(SeekFrom::Start(read_offset));
     }
 
     // Pending tool starts keyed by toolCallId when available, falling
     // back to tool name for older/incomplete events. Captures the turn at
     // start time so a later completion can't drift into a newer turn.
     let mut pending_starts: BTreeMap<String, PendingToolStart> = BTreeMap::new();
+    let mut pending_hooks: BTreeMap<String, PendingToolStart> = BTreeMap::new();
     let mut turn_order: Vec<String> = Vec::new();
     let mut turns: BTreeMap<String, TurnBuilder> = BTreeMap::new();
     let mut active_turn_id: Option<String> = None;
     let mut current_model = summary.last_model.clone();
-    let reader = BufReader::new(file);
-    for line in reader.lines().map_while(Result::ok) {
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    loop {
+        let line_start = read_offset;
+        line.clear();
+        let Ok(bytes_read) = reader.read_line(&mut line) else {
+            break;
+        };
+        if bytes_read == 0 {
+            break;
+        }
+        read_offset = read_offset.saturating_add(bytes_read as u64);
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
+        let event_ref = event_ref_from_offset(line_start);
         let event_type =
             string_from_paths(&value, &schema.events.event_type_paths).unwrap_or_default();
         let event_type = event_type.as_str();
@@ -1685,12 +1773,18 @@ fn summarize_events(
         }
 
         summary.event_count += 1;
+        let is_hook_start =
+            !schema.events.hook_start.is_empty() && event_type == schema.events.hook_start;
+        let is_hook_complete =
+            !schema.events.hook_complete.is_empty() && event_type == schema.events.hook_complete;
+        let is_hook_event = is_hook_start || is_hook_complete;
         let event_category = categorize_event(event_type).to_string();
-        if !schema
-            .events
-            .ignore_as_last_event
-            .iter()
-            .any(|ignored| ignored == event_type)
+        if !is_hook_event
+            && !schema
+                .events
+                .ignore_as_last_event
+                .iter()
+                .any(|ignored| ignored == event_type)
         {
             record_last_event(summary, &timestamp, event_type, &event_category);
         }
@@ -1707,7 +1801,113 @@ fn summarize_events(
             }
         }
 
-        if event_type == schema.events.tool_start {
+        if is_hook_start {
+            let hook_name = safe_hook_name(&value, schema);
+            if !is_configured_hook_type(&hook_name, configured_hook_types) {
+                continue;
+            }
+            let raw_hook_id = raw_hook_invocation_id(&value, schema);
+            let call_id = raw_hook_id
+                .as_deref()
+                .map(|id| safe_ref_id("hook", id))
+                .unwrap_or_default();
+            record_last_event(summary, &timestamp, event_type, "hooks");
+
+            summary.hooks_count += 1;
+            summary.last_tool = hook_name.clone();
+            recent_events.push(AgentEventSummary {
+                provider: provider.to_string(),
+                session_id: session_id.chars().take(8).collect(),
+                timestamp: timestamp.clone(),
+                kind: event_type.to_string(),
+                tool: hook_name.clone(),
+                category: "hooks".to_string(),
+                success: true,
+                input_tokens: Some(summary.input_tokens),
+                output_tokens: Some(summary.output_tokens),
+            });
+
+            push_session_tool_call(
+                &mut summary.recent_tool_calls,
+                SessionToolCall {
+                    tool: hook_name.clone(),
+                    category: "hooks".to_string(),
+                    timestamp: timestamp.clone(),
+                    success: true,
+                    completed_at: String::new(),
+                    model: current_model.clone(),
+                    call_id: call_id.clone(),
+                    event_ref: event_ref.clone(),
+                    turn_id: active_turn_id.clone().unwrap_or_default(),
+                    target: hook_name.clone(),
+                    details: build_safe_hook_details(provider, &hook_name),
+                    duration_ms: None,
+                },
+            );
+            let pending_key = raw_hook_id.unwrap_or_else(|| hook_name.clone());
+            pending_hooks.insert(
+                pending_key,
+                PendingToolStart {
+                    timestamp,
+                    category: "hooks".to_string(),
+                    tool: hook_name,
+                    call_id,
+                    event_ref,
+                    turn_id: active_turn_id.clone().unwrap_or_default(),
+                },
+            );
+        } else if is_hook_complete {
+            let hook_name = safe_hook_name(&value, schema);
+            if !is_configured_hook_type(&hook_name, configured_hook_types) {
+                continue;
+            }
+            let success = bool_from_paths(&value, &schema.events.success_paths).unwrap_or(true);
+            let completion_category = if success { "hooks" } else { "alert" };
+            record_last_event(summary, &timestamp, event_type, completion_category);
+            recent_events.push(AgentEventSummary {
+                provider: provider.to_string(),
+                session_id: session_id.chars().take(8).collect(),
+                timestamp: timestamp.clone(),
+                kind: event_type.to_string(),
+                tool: hook_name.clone(),
+                category: completion_category.to_string(),
+                success,
+                input_tokens: Some(summary.input_tokens),
+                output_tokens: Some(summary.output_tokens),
+            });
+
+            let complete_key =
+                raw_hook_invocation_id(&value, schema).unwrap_or_else(|| hook_name.clone());
+            if let Some(start) = pending_hooks.remove(&complete_key) {
+                let duration_ms = parse_iso_ms(&timestamp)
+                    .zip(parse_iso_ms(&start.timestamp))
+                    .and_then(|(end, start)| {
+                        if end >= start {
+                            Some(end - start)
+                        } else {
+                            None
+                        }
+                    });
+                if let Some(entry) = summary.recent_tool_calls.iter_mut().rev().find(|entry| {
+                    if !start.event_ref.is_empty() {
+                        entry.event_ref == start.event_ref
+                    } else if !start.call_id.is_empty() {
+                        entry.call_id == start.call_id
+                    } else {
+                        entry.category == "hooks"
+                            && entry.tool == start.tool
+                            && entry.duration_ms.is_none()
+                    }
+                }) {
+                    entry.success = success;
+                    entry.duration_ms = duration_ms;
+                    entry.completed_at = timestamp.clone();
+                }
+            }
+            if !success {
+                summary.error_count += 1;
+            }
+        } else if event_type == schema.events.tool_start {
             schema_stats.tool_starts += 1;
             let raw_tool_name = string_from_paths(&value, &schema.events.tool_name_paths)
                 .unwrap_or_else(|| "tool".to_string());
@@ -1784,6 +1984,7 @@ fn summarize_events(
                     completed_at: String::new(),
                     model: current_model.clone(),
                     call_id: call_id.clone(),
+                    event_ref: event_ref.clone(),
                     turn_id: turn_id.clone(),
                     target: tool_name.clone(),
                     details: build_safe_tool_details(
@@ -1804,6 +2005,7 @@ fn summarize_events(
                     category,
                     tool: tool_name,
                     call_id,
+                    event_ref,
                     turn_id,
                 },
             );
@@ -1845,7 +2047,9 @@ fn summarize_events(
                         }
                     });
                 if let Some(entry) = summary.recent_tool_calls.iter_mut().rev().find(|entry| {
-                    if !start.call_id.is_empty() {
+                    if !start.event_ref.is_empty() {
+                        entry.event_ref == start.event_ref
+                    } else if !start.call_id.is_empty() {
                         entry.call_id == start.call_id
                     } else {
                         entry.tool == start.tool && entry.duration_ms.is_none()
@@ -1963,6 +2167,176 @@ fn summarize_events(
         .map(TurnBuilder::to_summary)
         .collect();
     schema_stats
+}
+
+pub fn get_raw_tool_call_details(
+    provider: Option<String>,
+    session_id: String,
+    event_ref: String,
+) -> Result<RawToolCallDetails, String> {
+    let provider = provider.unwrap_or_else(|| "copilot".to_string());
+    if provider != "copilot" {
+        return Err(format!(
+            "Raw inspection is not supported for provider '{}'",
+            provider
+        ));
+    }
+    if !is_safe_public_ref(&session_id) {
+        return Err("Invalid session id".to_string());
+    }
+
+    let (schema, _) = load_copilot_schema();
+    let session_dir = resolve_copilot_session_dir(&schema, &session_id)?;
+    let events_path = first_existing_child(&session_dir, &schema.session.events_files);
+    raw_tool_call_details_from_events_path(&events_path, &schema, &event_ref)
+}
+
+fn resolve_copilot_session_dir(
+    schema: &ProviderSchema,
+    session_id: &str,
+) -> Result<PathBuf, String> {
+    let home = home_dir().ok_or_else(|| "HOME is not available".to_string())?;
+    let state_dir = path_from_home(&home, &schema.state_root);
+    let canonical_root = state_dir
+        .canonicalize()
+        .map_err(|err| format!("Unable to access Copilot session state: {}", err))?;
+    let matches = fs::read_dir(&canonical_root)
+        .map_err(|err| format!("Unable to scan Copilot session state: {}", err))?
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with(session_id) {
+                return None;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    match matches.len() {
+        0 => Err("No matching local session was found".to_string()),
+        1 => {
+            let canonical = matches[0]
+                .canonicalize()
+                .map_err(|err| format!("Unable to access session: {}", err))?;
+            if !canonical.starts_with(&canonical_root) {
+                return Err("Resolved session is outside the Copilot state directory".to_string());
+            }
+            Ok(canonical)
+        }
+        _ => Err(
+            "Session id is ambiguous; refresh activity before revealing raw details".to_string(),
+        ),
+    }
+}
+
+fn raw_tool_call_details_from_events_path(
+    path: &Path,
+    schema: &ProviderSchema,
+    event_ref: &str,
+) -> Result<RawToolCallDetails, String> {
+    let offset =
+        parse_event_ref(event_ref).ok_or_else(|| "Invalid tool event reference".to_string())?;
+    let mut file =
+        fs::File::open(path).map_err(|err| format!("Unable to open session events: {}", err))?;
+    let len = file
+        .metadata()
+        .map_err(|err| format!("Unable to inspect session events: {}", err))?
+        .len();
+    if offset >= len {
+        return Err("Tool event reference is no longer available".to_string());
+    }
+    file.seek(SeekFrom::Start(offset))
+        .map_err(|err| format!("Unable to read session events: {}", err))?;
+
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    if reader
+        .read_line(&mut line)
+        .map_err(|err| format!("Unable to read session event: {}", err))?
+        == 0
+    {
+        return Err("Tool event reference is no longer available".to_string());
+    }
+    let value = serde_json::from_str::<serde_json::Value>(&line)
+        .map_err(|_| "Tool event reference no longer points to a readable event".to_string())?;
+    let event_type = string_from_paths(&value, &schema.events.event_type_paths).unwrap_or_default();
+    if event_type != schema.events.tool_start {
+        return Err("Raw details are only available for tool calls".to_string());
+    }
+
+    let raw_args =
+        value_from_paths(&value, &schema.events.arguments_paths).map(raw_value_to_string);
+    let raw_call_id = raw_tool_call_id(&value, schema);
+    let raw_output = find_raw_tool_output(&mut reader, schema, raw_call_id.as_deref());
+    Ok(RawToolCallDetails {
+        raw_args,
+        raw_output,
+    })
+}
+
+fn find_raw_tool_output<R: BufRead>(
+    reader: &mut R,
+    schema: &ProviderSchema,
+    raw_call_id: Option<&str>,
+) -> Option<String> {
+    let raw_call_id = raw_call_id?;
+    if schema.events.output_paths.is_empty() {
+        return None;
+    }
+    let mut line = String::new();
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line).ok()?;
+        if bytes_read == 0 {
+            return None;
+        }
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        let event_type =
+            string_from_paths(&value, &schema.events.event_type_paths).unwrap_or_default();
+        if event_type != schema.events.tool_complete {
+            continue;
+        }
+        if raw_tool_call_id(&value, schema).as_deref() == Some(raw_call_id) {
+            return value_from_paths(&value, &schema.events.output_paths).map(raw_value_to_string);
+        }
+    }
+}
+
+fn raw_value_to_string(value: &serde_json::Value) -> String {
+    if let Some(value) = value.as_str() {
+        value.to_string()
+    } else {
+        serde_json::to_string_pretty(value)
+            .or_else(|_| serde_json::to_string(value))
+            .unwrap_or_default()
+    }
+}
+
+fn is_safe_public_ref(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn event_ref_from_offset(offset: u64) -> String {
+    format!("evt-{offset:x}")
+}
+
+fn parse_event_ref(event_ref: &str) -> Option<u64> {
+    let suffix = event_ref.strip_prefix("evt-")?;
+    if suffix.is_empty() || !suffix.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    u64::from_str_radix(suffix, 16).ok()
 }
 
 fn value_at_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
@@ -2208,6 +2582,10 @@ fn raw_tool_call_id(value: &serde_json::Value, schema: &ProviderSchema) -> Optio
     string_from_paths(value, &schema.events.tool_call_id_paths)
 }
 
+fn raw_hook_invocation_id(value: &serde_json::Value, schema: &ProviderSchema) -> Option<String> {
+    string_from_paths(value, &schema.events.hook_invocation_id_paths)
+}
+
 fn safe_ref_id(prefix: &str, raw: &str) -> String {
     let suffix = raw
         .chars()
@@ -2288,9 +2666,25 @@ fn build_safe_tool_details(
     details
 }
 
+fn safe_hook_name(value: &serde_json::Value, schema: &ProviderSchema) -> String {
+    string_from_paths(value, &schema.events.hook_name_paths)
+        .map(|name| sanitize_identifier(&name, "hook"))
+        .unwrap_or_else(|| "hook".to_string())
+}
+
+fn build_safe_hook_details(provider: &str, hook_name: &str) -> Vec<SafeDetail> {
+    vec![
+        safe_detail("Type", "Hook"),
+        safe_detail("Hook type", hook_name),
+        safe_detail("Provider", provider),
+        safe_detail("Privacy", "input/output hidden"),
+    ]
+}
+
 fn detail_kind(category: &str) -> &'static str {
     match category {
         "mcp" => "MCP tool",
+        "hooks" => "Hook",
         "skills" => "Skill",
         "delegates" => "Sub-agent",
         "terminal" => "Command tool",
@@ -2307,6 +2701,60 @@ fn safe_detail(label: &str, value: &str) -> SafeDetail {
         label: label.to_string(),
         value: value.to_string(),
     }
+}
+
+fn load_configured_hook_types(schema: &ProviderSchema) -> HashSet<String> {
+    if schema.hooks.config_path.is_empty() || schema.hooks.hook_types_path.is_empty() {
+        return HashSet::new();
+    }
+    let Some(home) = home_dir() else {
+        return HashSet::new();
+    };
+    let path = path_from_home(&home, &schema.hooks.config_path);
+    let Ok(raw) = fs::read_to_string(&path) else {
+        return HashSet::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return HashSet::new();
+    };
+
+    configured_hook_types_from_value(&value, schema)
+}
+
+fn configured_hook_types_from_value(
+    value: &serde_json::Value,
+    schema: &ProviderSchema,
+) -> HashSet<String> {
+    let mut hook_types = HashSet::new();
+    let Some(configured_hooks) =
+        value_at_path(value, &schema.hooks.hook_types_path).and_then(|value| value.as_object())
+    else {
+        return hook_types;
+    };
+
+    for (hook_type, entries) in configured_hooks {
+        if !has_configured_hook_entries(entries) {
+            continue;
+        }
+        let safe_hook_type = sanitize_identifier(hook_type, "");
+        if !safe_hook_type.is_empty() {
+            hook_types.insert(safe_hook_type.to_ascii_lowercase());
+        }
+    }
+
+    hook_types
+}
+
+fn has_configured_hook_entries(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Array(entries) => !entries.is_empty(),
+        serde_json::Value::Object(entries) => !entries.is_empty(),
+        _ => false,
+    }
+}
+
+fn is_configured_hook_type(hook_name: &str, configured_hook_types: &HashSet<String>) -> bool {
+    configured_hook_types.contains(&hook_name.to_ascii_lowercase())
 }
 
 /// Load all MCP-registered tool names from `~/.copilot/m-mcp-servers.json`
@@ -2504,7 +2952,7 @@ mod tests {
     fn bundled_provider_schema_parses_and_validates() {
         let schema = test_schema();
         assert_eq!(schema.provider, "copilot");
-        assert_eq!(schema.schema_version, "1.0.0");
+        assert_eq!(schema.schema_version, "1.2.0");
         assert!(schema
             .session
             .relevant_files
@@ -2513,11 +2961,11 @@ mod tests {
 
     #[test]
     fn published_provider_schema_matches_bundled_schema() {
-        let published = include_str!("../../docs/provider-schemas/copilot/1.0.0.json");
+        let published = include_str!("../../docs/provider-schemas/copilot/1.2.0.json");
         assert_eq!(published, BUNDLED_COPILOT_SCHEMA);
         assert_eq!(
             sha256_hex(published),
-            "cc1689eaee48b77289c34d9d30faf358dbadb614dae6b4ed6ff0cf0354c31f97"
+            "2ac66ae1be46569be08978d1e7bc4605830bfd66edb2dd9694b2d495f4a872f2"
         );
     }
 
@@ -2593,6 +3041,156 @@ mod tests {
             Err(err) => err,
         };
         assert!(err.contains("unsafe arguments path"));
+    }
+
+    #[test]
+    fn configured_hook_types_are_read_from_hook_config_keys_only() {
+        let schema = test_schema();
+        let config = serde_json::json!({
+            "version": 1,
+            "hooks": {
+                "agentStop": [
+                    {
+                        "type": "bash",
+                        "bash": "SECRET_COMMAND",
+                        "timeoutSec": 5
+                    }
+                ],
+                "postToolUse": [],
+                "bad hook /Users/dan/private": [
+                    {
+                        "type": "bash",
+                        "bash": "SECRET_PATH"
+                    }
+                ]
+            }
+        });
+
+        let configured = configured_hook_types_from_value(&config, &schema);
+
+        assert!(configured.contains("agentstop"));
+        assert!(!configured.contains("posttooluse"));
+        assert_eq!(configured.len(), 1);
+    }
+
+    #[test]
+    fn unconfigured_hook_events_are_ignored_for_hook_activity() {
+        use std::io::Write;
+
+        let schema = test_schema();
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "cmc_unconfigured_hook_events_{}_{}.jsonl",
+            std::process::id(),
+            unix_ms(SystemTime::now())
+        ));
+        let mut file = std::fs::File::create(&path).expect("create hook test events");
+        writeln!(
+            file,
+            r#"{{"type":"hook.start","timestamp":"2026-05-21T07:14:00.000Z","data":{{"hookInvocationId":"abc123456789","hookType":"postToolUse","input":{{"cwd":"/Users/dan/private","prompt":"SECRET_PROMPT","toolArgs":{{"command":"SECRET_COMMAND"}}}}}}}}"#
+        )
+        .expect("write hook start");
+        writeln!(
+            file,
+            r#"{{"type":"hook.end","timestamp":"2026-05-21T07:14:01.250Z","data":{{"hookInvocationId":"abc123456789","hookType":"postToolUse","success":false,"output":"SECRET_OUTPUT","error":{{"message":"SECRET_ERROR"}}}}}}"#
+        )
+        .expect("write hook end");
+        drop(file);
+
+        let mut summary = AgentSessionSummary::default();
+        let mut tool_counts = BTreeMap::new();
+        let mut recent_events = Vec::new();
+        let stats = summarize_events(
+            "copilot",
+            &path,
+            "hook-session-123456789",
+            &mut summary,
+            &mut tool_counts,
+            &mut recent_events,
+            &HashSet::new(),
+            &HashSet::new(),
+            &schema,
+        );
+        let rendered = serde_json::to_string(&summary).expect("serialize summary");
+
+        assert_eq!(stats.recognized_events, 2);
+        assert_eq!(summary.hooks_count, 0);
+        assert_eq!(summary.tool_count, 0);
+        assert_eq!(summary.error_count, 0);
+        assert!(summary.last_tool.is_empty());
+        assert!(summary.last_event_kind.is_empty());
+        assert!(tool_counts.is_empty());
+        assert!(summary.recent_tool_calls.is_empty());
+        assert!(recent_events.is_empty());
+        assert!(!rendered.contains("SECRET"));
+        assert!(!rendered.contains("/Users/dan/private"));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn configured_hook_events_are_counted_without_exposing_sensitive_payloads() {
+        use std::io::Write;
+
+        let schema = test_schema();
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "cmc_hook_events_{}_{}.jsonl",
+            std::process::id(),
+            unix_ms(SystemTime::now())
+        ));
+        let mut file = std::fs::File::create(&path).expect("create hook test events");
+        writeln!(
+            file,
+            r#"{{"type":"hook.start","timestamp":"2026-05-21T07:14:00.000Z","data":{{"hookInvocationId":"abc123456789","hookType":"postToolUse","input":{{"cwd":"/Users/dan/private","prompt":"SECRET_PROMPT","toolArgs":{{"command":"SECRET_COMMAND"}}}}}}}}"#
+        )
+        .expect("write hook start");
+        writeln!(
+            file,
+            r#"{{"type":"hook.end","timestamp":"2026-05-21T07:14:01.250Z","data":{{"hookInvocationId":"abc123456789","hookType":"postToolUse","success":false,"output":"SECRET_OUTPUT","error":{{"message":"SECRET_ERROR"}}}}}}"#
+        )
+        .expect("write hook end");
+        drop(file);
+
+        let mut summary = AgentSessionSummary::default();
+        let mut tool_counts = BTreeMap::new();
+        let mut recent_events = Vec::new();
+        let configured_hook_types = HashSet::from(["posttooluse".to_string()]);
+        let stats = summarize_events(
+            "copilot",
+            &path,
+            "hook-session-123456789",
+            &mut summary,
+            &mut tool_counts,
+            &mut recent_events,
+            &HashSet::new(),
+            &configured_hook_types,
+            &schema,
+        );
+        let rendered = serde_json::to_string(&summary).expect("serialize summary");
+
+        assert_eq!(stats.recognized_events, 2);
+        assert_eq!(summary.hooks_count, 1);
+        assert_eq!(summary.tool_count, 0);
+        assert_eq!(summary.error_count, 1);
+        assert_eq!(summary.last_tool, "postToolUse");
+        assert!(tool_counts.is_empty());
+        assert_eq!(summary.recent_tool_calls.len(), 1);
+        let hook = &summary.recent_tool_calls[0];
+        assert_eq!(hook.category, "hooks");
+        assert_eq!(hook.tool, "postToolUse");
+        assert!(!hook.success);
+        assert_eq!(hook.duration_ms, Some(1250));
+        assert!(recent_events
+            .iter()
+            .any(|event| event.kind == "hook.start" && event.category == "hooks"));
+        assert!(recent_events
+            .iter()
+            .any(|event| event.kind == "hook.end" && event.category == "alert" && !event.success));
+        assert!(!rendered.contains("SECRET"));
+        assert!(!rendered.contains("/Users/dan/private"));
+
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -2965,7 +3563,7 @@ mod tests {
             .unwrap();
             writeln!(
                 f,
-                r#"{{"type":"tool.execution_complete","timestamp":"2026-01-01T00:00:02.500Z","data":{{"toolCallId":"call-skill","turnId":"turn-alpha","success":true}}}}"#
+                r#"{{"type":"tool.execution_complete","timestamp":"2026-01-01T00:00:02.500Z","data":{{"toolCallId":"call-skill","turnId":"turn-alpha","success":true,"output":"SECRET_OUTPUT"}}}}"#
             )
             .unwrap();
             writeln!(
@@ -3003,6 +3601,7 @@ mod tests {
             &mut tool_counts,
             &mut recent_events,
             &allowlist,
+            &HashSet::new(),
             &schema,
         );
 
@@ -3010,6 +3609,7 @@ mod tests {
         assert_eq!(summary.recent_tool_calls[0].tool, "blog-writer");
         assert_eq!(summary.recent_tool_calls[0].category, "skills");
         assert_eq!(summary.recent_tool_calls[0].duration_ms, Some(1500));
+        assert!(!summary.recent_tool_calls[0].event_ref.is_empty());
         assert_eq!(summary.recent_tool_calls[1].tool, "code-reviewer");
         assert_eq!(summary.recent_tool_calls[1].category, "delegates");
         assert!(!summary.recent_tool_calls[1].success);
@@ -3044,7 +3644,17 @@ mod tests {
         let serialized = serde_json::to_string(&summary).expect("serialize summary");
         assert!(!serialized.contains("SECRET_PROMPT"));
         assert!(!serialized.contains("SECRET_TASK"));
+        assert!(!serialized.contains("SECRET_OUTPUT"));
         assert!(!serialized.contains("/Users/dan/.env"));
+
+        let raw = raw_tool_call_details_from_events_path(
+            &path,
+            &schema,
+            &summary.recent_tool_calls[0].event_ref,
+        )
+        .expect("raw tool details");
+        assert!(raw.raw_args.unwrap().contains("SECRET_PROMPT"));
+        assert_eq!(raw.raw_output.as_deref(), Some("SECRET_OUTPUT"));
 
         let _ = std::fs::remove_file(&path);
     }
@@ -3077,6 +3687,7 @@ mod tests {
             &mut tool_counts,
             &mut recent_events,
             &allowlist,
+            &HashSet::new(),
             &schema,
         );
 
@@ -3131,6 +3742,7 @@ mod tests {
             &mut tool_counts,
             &mut recent_events,
             &allowlist,
+            &HashSet::new(),
             &schema,
         );
 
@@ -3185,6 +3797,7 @@ mod tests {
             &mut tool_counts,
             &mut recent_events,
             &allowlist,
+            &HashSet::new(),
             &schema,
         );
 
@@ -3283,6 +3896,7 @@ mod tests {
             &mut tool_counts,
             &mut recent_events,
             &allowlist,
+            &HashSet::new(),
             &schema,
         );
 

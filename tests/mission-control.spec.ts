@@ -11,15 +11,15 @@ const MISSION_FIXTURE = {
   total_tool_calls: 47,
   total_output_tokens: 8120,
   sessions: [
-    { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 82, tool_count: 23, write_count: 8, read_count: 9, command_count: 4, web_count: 1, task_count: 3, delegates_count: 1, skills_count: 2, court_count: 4, mcp_count: 1, error_count: 0, input_tokens: 1600, output_tokens: 4200, last_tool: 'apply_patch', last_event_kind: 'tool.execution_start', last_event_category: 'forge', stale_seconds: 12, token_checkpoints: [
+    { id: 'alpha123', title: 'Build Mission Control', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'working', event_count: 82, tool_count: 23, write_count: 8, read_count: 9, command_count: 4, web_count: 1, task_count: 3, delegates_count: 1, skills_count: 2, court_count: 4, mcp_count: 1, hooks_count: 3, error_count: 0, input_tokens: 1600, output_tokens: 4200, last_tool: 'apply_patch', last_event_kind: 'tool.execution_start', last_event_category: 'forge', stale_seconds: 12, token_checkpoints: [
       { timestamp: '2026-05-21T07:11:00Z', input_tokens: 100, output_tokens: 200 },
       { timestamp: '2026-05-21T07:13:00Z', input_tokens: 400, output_tokens: 900 },
       { timestamp: '2026-05-21T07:15:00Z', input_tokens: 1600, output_tokens: 4200 },
     ] },
-    { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 64, tool_count: 17, write_count: 2, read_count: 7, command_count: 6, web_count: 0, task_count: 5, delegates_count: 2, skills_count: 3, court_count: 1, mcp_count: 4, error_count: 1, input_tokens: 1200, output_tokens: 2920, last_tool: 'bash', last_event_kind: 'tool.execution_complete', last_event_category: 'alert', stale_seconds: 25, token_checkpoints: [
+    { id: 'beta4567', title: 'Review Tests', repository: 'copilot-mission-control', branch: 'main', updated_at: '', is_active: true, status: 'needs-attention', event_count: 64, tool_count: 17, write_count: 2, read_count: 7, command_count: 6, web_count: 0, task_count: 5, delegates_count: 2, skills_count: 3, court_count: 1, mcp_count: 4, hooks_count: 2, error_count: 1, input_tokens: 1200, output_tokens: 2920, last_tool: 'bash', last_event_kind: 'tool.execution_complete', last_event_category: 'alert', stale_seconds: 25, token_checkpoints: [
       { timestamp: '2026-05-21T07:14:00Z', input_tokens: 1200, output_tokens: 2920 },
     ] },
-    { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: false, status: 'idle', event_count: 38, tool_count: 7, write_count: 0, read_count: 3, command_count: 0, web_count: 4, task_count: 0, delegates_count: 0, skills_count: 0, court_count: 0, mcp_count: 0, error_count: 0, input_tokens: 500, output_tokens: 1000, last_tool: 'web_fetch', last_event_kind: 'tool.execution_start', last_event_category: 'signal', stale_seconds: 900 },
+    { id: 'gamma890', title: 'Research UI', repository: 'docs', branch: 'main', updated_at: '', is_active: false, status: 'idle', event_count: 38, tool_count: 7, write_count: 0, read_count: 3, command_count: 0, web_count: 4, task_count: 0, delegates_count: 0, skills_count: 0, court_count: 0, mcp_count: 0, hooks_count: 0, error_count: 0, input_tokens: 500, output_tokens: 1000, last_tool: 'web_fetch', last_event_kind: 'tool.execution_start', last_event_category: 'signal', stale_seconds: 900 },
   ],
   tools: [
     { name: 'view', category: 'library', count: 14 },
@@ -82,12 +82,12 @@ async function getMissionState(page: Page) {
       opsMode: scene.opsSummary?.mode,
       opsAttention: scene.opsSummary?.attention,
       opsRecommendation: scene.opsSummary?.recommendation,
-      insightLabels: (scene.insightCards ?? []).map((card: any) => card.label),
       scannedSessions: scene.activity?.scanned_sessions,
       screenW: window.innerWidth,
       screenH: window.innerHeight,
       layout: scene.layout ? {
         leftX: scene.layout.leftX,
+        topY: scene.layout.topY,
         panelW: scene.layout.panelW,
         opsY: scene.layout.opsY,
         opsH: scene.layout.opsH,
@@ -97,17 +97,51 @@ async function getMissionState(page: Page) {
         inspectorW: scene.layout.inspectorW,
         radiusX: scene.layout.radiusX,
         radiusY: scene.layout.radiusY,
+        centerX: scene.layout.centerX,
+        centerY: scene.layout.centerY,
+        hubY: scene.layout.hubY,
         quarterR: scene.layout.quarterR,
         compact: scene.layout.compact,
       } : null,
-      quarterRects: (scene.quarters ?? []).map((d: any) => ({
-        key: d.key, x: d.x, y: d.y,
-      })),
+      quarterRects: (scene.quarters ?? []).map((d: any) => {
+        const quarterSize = scene.layout?.quarterSize ?? 0;
+        const labelBlockH = Math.round(38 * Math.max(scene.layout?.s ?? 1, 0.85));
+        const frameH = quarterSize + labelBlockH;
+        return {
+          key: d.key,
+          x: d.x,
+          y: d.y,
+          left: d.x - quarterSize / 2,
+          right: d.x + quarterSize / 2,
+          top: d.y - quarterSize / 2,
+          bottom: d.y - quarterSize / 2 + frameH,
+        };
+      }),
+      moat: scene.moatGeometry ? {
+        x: scene.moatGeometry.x,
+        y: scene.moatGeometry.y,
+        radius: scene.moatGeometry.radius,
+      } : null,
       quarterCounts: Object.fromEntries((scene.quarters ?? []).map((d: any) => [d.key, d.count])),
       inspectedQuarterKey: scene.inspectedQuarterKey ?? null,
       hoveredQuarterIndex: scene.hoveredQuarterIndex ?? -1,
     };
   });
+}
+
+function expectNoQuarterFrameOverlaps(rects: Array<{ key: string; left: number; right: number; top: number; bottom: number }>) {
+  for (let i = 0; i < rects.length; i++) {
+    for (let j = i + 1; j < rects.length; j++) {
+      const a = rects[i];
+      const b = rects[j];
+      const xOverlap = Math.min(a.right, b.right) - Math.max(a.left, b.left);
+      const yOverlap = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
+      expect(
+        xOverlap <= 0 || yOverlap <= 0,
+        `quarter frames ${a.key} and ${b.key} should not overlap (${Math.round(xOverlap)}x${Math.round(yOverlap)})`,
+      ).toBe(true);
+    }
+  }
 }
 
 function inspectorFixture() {
@@ -123,6 +157,7 @@ function inspectorFixture() {
       duration_ms: 1000,
       model: 'gpt-5.5',
       call_id: 'call-mcp1',
+      event_ref: 'evt-1',
       turn_id: 'turn-a1',
       target: 'browser_navigate',
       details: [
@@ -141,6 +176,7 @@ function inspectorFixture() {
       duration_ms: 2000,
       model: 'gpt-5.5',
       call_id: 'call-skill1',
+      event_ref: 'evt-2',
       turn_id: 'turn-a1',
       target: 'blog-writer',
       details: [
@@ -158,6 +194,7 @@ function inspectorFixture() {
       success: true,
       model: 'gpt-5.5',
       call_id: 'call-bash-long',
+      event_ref: 'evt-3',
       turn_id: 'turn-tail',
       target: LONG_TOOL_NAME,
       details: [
@@ -175,6 +212,7 @@ function inspectorFixture() {
       duration_ms: 4000,
       model: 'gpt-5.5',
       call_id: 'call-agent1',
+      event_ref: 'evt-4',
       turn_id: 'turn-a1',
       target: 'code-reviewer',
       details: [
@@ -257,9 +295,8 @@ test.describe('Copilot Mission Control — Startup', () => {
     expect(state!.activeSessions).toBe(2);
     expect(state!.toolCalls).toBe(47);
     expect(state!.sessionCount).toBe(3);
-    expect(state!.quarterCount).toBe(8);
+    expect(state!.quarterCount).toBe(9);
     expect(state!.scannedSessions).toBe(3);
-    expect(state!.insightLabels).toEqual(['Active', 'Tools/min']);
     expect(state!.opsAttention).toBe('review');
     expect(state!.opsRecommendation).toMatch(/failed.*in /);
     expect(state!.selectedSessionId).toBe('beta4567');
@@ -268,6 +305,7 @@ test.describe('Copilot Mission Control — Startup', () => {
       library: 7,
       terminal: 6,
       signal: 0,
+      hooks: 2,
       delegates: 2,
       skills: 3,
       court: 1,
@@ -277,11 +315,9 @@ test.describe('Copilot Mission Control — Startup', () => {
 
   test('top bar HUD elements are present', async ({ page }) => {
     await expect(page.locator('#topbar .brand')).toBeVisible();
-    await expect(page.locator('#topbar-metrics .topbar-metric')).toHaveCount(2);
-    await expect(page.locator('#topbar-metrics')).toContainText('Active');
-    await expect(page.locator('#topbar-metrics')).toContainText('Tools/min');
-    await expect(page.locator('#topbar-metrics')).not.toContainText('Turns');
-    await expect(page.locator('#topbar-metrics')).not.toContainText('Tokens');
+    await expect(page.locator('#topbar-metrics')).toHaveCount(0);
+    await expect(page.locator('#topbar')).not.toContainText('Active');
+    await expect(page.locator('#topbar')).not.toContainText('Tools/min');
     await expect(page.locator('#ops-chip')).toHaveCount(0);
     await expect(page.locator('#ops-rec')).toHaveCount(0);
     await expect(page.locator('#topbar-controls')).toBeVisible();
@@ -301,10 +337,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     const state = await getMissionState(page);
     expect(state!.toolCalls).toBe(47);
     expect(state!.sessionCount).toBe(3);
-    await expect(page.locator('#dom-workmix')).toBeVisible();
-    await expect(page.locator('#dom-workmix')).toContainText('Activity mix');
-    await expect(page.locator('#dom-workmix [data-cmc-action="workmix-scope"]')).toBeVisible();
-    await expect(page.locator('#dom-workmix .cmc-work-row')).toHaveCount(6);
+    await expect(page.locator('#dom-workmix')).toHaveCount(0);
     const layout = await page.evaluate(() => {
       const rect = (selector: string) => {
         const el = document.querySelector(selector) as HTMLElement | null;
@@ -313,19 +346,24 @@ test.describe('Copilot Mission Control — Dashboard', () => {
         return { top: r.top, bottom: r.bottom };
       };
       return {
-        workMix: rect('#dom-workmix'),
-        lastWorkRow: rect('#dom-workmix .cmc-work-row:last-child'),
+        session: rect('#dom-session'),
+        actions: rect('#dom-session .cmc-actions'),
         feed: rect('#dom-feed'),
         replay: rect('#dom-replay'),
       };
     });
-    expect(layout.workMix).toBeTruthy();
-    expect(layout.lastWorkRow).toBeTruthy();
+    expect(layout.session).toBeTruthy();
+    expect(layout.actions).toBeTruthy();
     expect(layout.feed).toBeTruthy();
     expect(layout.replay).toBeTruthy();
-    expect(layout.lastWorkRow!.bottom).toBeLessThanOrEqual(layout.workMix!.bottom - 8);
-    expect(layout.feed!.top).toBeGreaterThanOrEqual(layout.workMix!.bottom + 8);
+    expect(layout.session!.bottom).toBeLessThanOrEqual(layout.actions!.bottom + 36);
+    expect(layout.feed!.top).toBeGreaterThanOrEqual(layout.session!.bottom + 8);
     expect(layout.feed!.bottom).toBeLessThanOrEqual(layout.replay!.top - 8);
+
+    const sectorText = await page.locator('#dom-quarter').innerText();
+    expect(sectorText).not.toContain('failed');
+    expect(sectorText).not.toContain('!');
+    expect(sectorText).not.toContain('Selected:');
   });
 
   test('selected session summary uses recent meaningful tool activity', async ({ page }) => {
@@ -371,11 +409,18 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     const text = await page.locator('#dom-session').innerText();
     expect(text).toContain('Last: bash completed');
     expect(text).toContain('Tool: bash');
-    expect(text).toContain('Tokens in/out: 1,200/2,920');
+    expect(text).toContain('Tokens in/out: 1,200 / 2,920');
     expect(text).toMatch(/Age: \d+s/);
     expect(text).not.toContain('session.shutdown');
     expect(text).not.toContain('report_intent');
     expect(text).not.toContain('Age: 2h');
+
+    const pillTops = await page.locator('#dom-session .cmc-meta-pill').evaluateAll((pills) =>
+      pills.map((pill) => Math.round((pill as HTMLElement).getBoundingClientRect().top)),
+    );
+    expect(pillTops).toHaveLength(4);
+    expect(new Set(pillTops).size).toBe(4);
+    expect(pillTops).toEqual([...pillTops].sort((a, b) => a - b));
   });
 
   test('bootstrap suppresses live pulses so historical events do not animate', async ({ page }) => {
@@ -421,6 +466,29 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     await page.waitForTimeout(250);
     const mid = await getMissionState(page);
     expect(mid!.activeEventPulseCount).toBeGreaterThan(0);
+  });
+
+  test('hook events route to the Hooks sector flow', async ({ page }) => {
+    await page.waitForTimeout(800);
+    const queued = await page.evaluate(() => {
+      const fixture = (window as any).__missionControlFixture;
+      const newEvent = {
+        session_id: 'beta4567',
+        timestamp: new Date().toISOString(),
+        kind: 'hook.start',
+        tool: 'postToolUse',
+        category: 'hooks',
+        success: true,
+      };
+      fixture.recent_events = [newEvent, ...fixture.recent_events];
+      (window as any).__cmcOnAgentActivityChanged?.();
+      return true;
+    });
+    expect(queued).toBe(true);
+    await page.waitForTimeout(250);
+    const state = await getMissionState(page);
+    expect(state!.activeEventPulseCount).toBeGreaterThan(0);
+    await expect(page.locator('#dom-feed')).toContainText('postToolUse hook started');
   });
 
   test('replay timeline ingests events into the log and stays live by default', async ({ page }) => {
@@ -476,22 +544,11 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     await expect(meta).toContainText('Last: view started');
     await expect(meta).toContainText('Tool: view');
     await expect(meta).toContainText('Age: at cursor');
-    await expect(meta).toContainText('Tokens in/out: 400/900');
-    const scope = page.locator('#workmix-scope-select');
-    await scope.selectOption('selected');
-    const rows = page.locator('#dom-workmix .cmc-work-row');
-    await expect(rows.nth(0)).toContainText('Read');
-    await expect(rows.nth(0)).toContainText('9');
-    await expect(rows.nth(1)).toContainText('Edit');
-    await expect(rows.nth(1)).toContainText('7');
-    await scope.selectOption('running');
-    await expect(rows.nth(0)).toContainText('16');
-    await expect(rows.nth(1)).toContainText('9');
+    await expect(meta).toContainText('Tokens in/out: 400 / 900');
 
     await page.mouse.click(box!.x + box!.width * 0.95, box!.y + box!.height / 2);
     await page.waitForTimeout(120);
-    await expect(meta).toContainText('Tokens in/out: 1,600/4,200');
-    await expect(rows.nth(1)).toContainText('10');
+    await expect(meta).toContainText('Tokens in/out: 1,600 / 4,200');
   });
 
   test('replay timeline exposes keyboard slider controls', async ({ page }) => {
@@ -522,6 +579,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
       library: 9,
       terminal: 4,
       signal: 1,
+      hooks: 3,
       delegates: 1,
       skills: 2,
       court: 4,
@@ -587,6 +645,7 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(text).toContain('code-reviewer');
     expect(text).toContain('Sub-agent');
     expect(text).toContain('arguments/output hidden');
+    expect(text).toContain('Reveal raw local details');
     expect(text).not.toContain('SECRET_AGENT');
     expect(text).not.toContain('SECRET_MCP');
     expect(text).not.toContain('/Users/dan/.env');
@@ -606,6 +665,34 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     await page.keyboard.press('Escape');
     await expect(page.locator('#inspector-overlay')).not.toHaveClass(/visible/);
     await expect(page.locator('#dom-session [data-cmc-action="inspector"]')).toBeFocused();
+  });
+
+  test('inspector reveals raw local details only after explicit opt-in', async ({ page }) => {
+    await page.addInitScript((fixture) => {
+      (window as any).__missionControlFixture = fixture;
+      (window as any).__TAURI_INTERNALS__ = {
+        invoke: async (command: string, args: any) => {
+          if (command !== 'get_raw_tool_call_details') throw new Error(`unexpected command ${command}`);
+          if (args.eventRef === 'evt-4') {
+            return {
+              raw_args: '{"agent_type":"code-reviewer","prompt":"SECRET_AGENT"}',
+              raw_output: 'SECRET_AGENT_OUTPUT',
+            };
+          }
+          return {};
+        },
+      };
+    }, inspectorFixture());
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    await page.locator('#dom-session [data-cmc-action="inspector"]').click();
+    await expect(page.locator('#inspector-overlay')).toHaveClass(/visible/);
+    await expect(page.locator('#inspector-dialog')).not.toContainText('SECRET_AGENT');
+
+    await page.locator('[data-inspector-reveal]').click();
+    await expect(page.locator('#inspector-dialog')).toContainText('SECRET_AGENT');
+    await expect(page.locator('#inspector-dialog')).toContainText('SECRET_AGENT_OUTPUT');
   });
 
   test('inspector turn mode shows turn-by-turn story and related tools', async ({ page }) => {
@@ -846,6 +933,38 @@ test.describe('Copilot Mission Control — Focus Mode', () => {
     const state = await getMissionState(page);
     expect(state!.layout!.panelW).toBe(0);
   });
+
+  test('compact focus mode keeps all sectors evenly spaced around the center', async ({ page }) => {
+    await installFixture(page);
+    await page.setViewportSize({ width: 832, height: 644 });
+    await page.addInitScript(() => {
+      localStorage.setItem('cmc_panels_hidden', '1');
+    });
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    const state = await getMissionState(page);
+    const layout = state!.layout!;
+    expect(layout.panelW).toBe(0);
+    expect(state!.moat!.x).toBeCloseTo(layout.centerX, 1);
+    expect(state!.moat!.y).toBeCloseTo(layout.hubY, 1);
+    expectNoQuarterFrameOverlaps(state!.quarterRects);
+    expect(layout.radiusX).toBeCloseTo(layout.radiusY, 1);
+    const wellTop = layout.opsY + layout.opsH;
+    const wellBottom = layout.bottomY;
+    const topGap = Math.min(...state!.quarterRects.map((d) => d.top - wellTop));
+    const bottomGap = Math.min(...state!.quarterRects.map((d) => wellBottom - d.bottom));
+    expect(topGap, 'focus-mode ring should not leave a larger top gutter than bottom gutter').toBeLessThanOrEqual(bottomGap + 8);
+    for (const d of state!.quarterRects) {
+      const nx = (d.x - layout.centerX) / layout.radiusX;
+      const ny = (d.y - layout.centerY) / layout.radiusY;
+      expect(Math.hypot(nx, ny), `quarter ${d.key} should stay on the center ring`).toBeCloseTo(1, 1);
+      const centerDistance = Math.hypot(d.x - state!.moat!.x, d.y - state!.moat!.y);
+      expect(centerDistance, `quarter ${d.key} should not crowd the central item`).toBeGreaterThan(state!.moat!.radius + layout.quarterR + 8);
+    }
+    const visualSectorCenterY = state!.quarterRects.reduce((sum, rect) => sum + (rect.top + rect.bottom) / 2, 0) / state!.quarterRects.length;
+    expect(state!.moat!.y, 'central hub should align to the visual center of the full sector cards').toBeCloseTo(visualSectorCenterY, 1);
+  });
 });
 
 test.describe('Copilot Mission Control — Schema Drift', () => {
@@ -854,7 +973,7 @@ test.describe('Copilot Mission Control — Schema Drift', () => {
     fixture.schema_drift = [
       {
         provider: 'copilot',
-        schema_version: '1.0.0',
+        schema_version: '1.1.0',
         severity: 'warning',
         summary: 'Possible Copilot schema drift detected in 1 of 3 scanned sessions.',
         checked_sessions: 3,
@@ -962,7 +1081,7 @@ for (const vp of VIEWPORTS) {
     expect(state!.screenW).toBe(vp.width);
     expect(state!.screenH).toBe(vp.height);
     expect(state!.sessionCount).toBe(3);
-    expect(state!.quarterCount).toBe(8);
+    expect(state!.quarterCount).toBe(9);
 
     // Layout regression: quarters must fit between side panels with at
     // least a small gutter, and inside the central well between the ops
@@ -970,10 +1089,17 @@ for (const vp of VIEWPORTS) {
     // bug where quarters crashed into Selected Session / Activity Feed.
     const layout = state!.layout!;
     expect(layout).not.toBeNull();
+    expect(
+      layout.topY,
+      'left dashboard panels should sit near the top of the canvas without a large empty gutter',
+    ).toBeLessThanOrEqual(layout.compact ? 24 : Math.max(28, state!.screenH * 0.02));
     const leftPanelRight = layout.leftX + layout.panelW;
     const wellRight = state!.screenW - layout.leftX;
     const wellTop = layout.opsY + layout.opsH;
     const wellBottom = layout.bottomY;
+    const verticalWellGap = Math.min(
+      ...state!.quarterRects.map((d) => Math.min(d.top - wellTop, wellBottom - d.bottom)),
+    );
     for (const d of state!.quarterRects) {
       const r = layout.quarterR;
       expect(d.x - r, `quarter ${d.key} left edge crosses left panel`).toBeGreaterThanOrEqual(leftPanelRight);
@@ -981,6 +1107,18 @@ for (const vp of VIEWPORTS) {
       expect(d.y - r, `quarter ${d.key} top edge crosses ops strip`).toBeGreaterThanOrEqual(wellTop);
       expect(d.y + r, `quarter ${d.key} bottom edge crosses bottom inspector`).toBeLessThanOrEqual(wellBottom);
     }
-    expect(layout.radiusX / layout.radiusY, 'sector ring should not stretch into a flat oval').toBeLessThan(1.5);
+    expect(
+      verticalWellGap,
+      'sector ring should expand into available vertical space without crossing the well',
+    ).toBeLessThanOrEqual(Math.max(18, layout.quarterR * 0.75));
+    expectNoQuarterFrameOverlaps(state!.quarterRects);
+    expect(layout.radiusX, 'sector ring should use equal horizontal and vertical radii').toBeCloseTo(layout.radiusY, 1);
+    const visualSectorCenterY = state!.quarterRects.reduce((sum, rect) => sum + (rect.top + rect.bottom) / 2, 0) / state!.quarterRects.length;
+    expect(state!.moat!.y, 'central hub should align to the visual center of the full sector cards').toBeCloseTo(visualSectorCenterY, 1);
+    for (const d of state!.quarterRects) {
+      const nx = (d.x - layout.centerX) / layout.radiusX;
+      const ny = (d.y - layout.centerY) / layout.radiusY;
+      expect(Math.hypot(nx, ny), `quarter ${d.key} should stay on the sector ring`).toBeCloseTo(1, 1);
+    }
   });
 }

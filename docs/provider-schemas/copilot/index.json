@@ -6,6 +6,16 @@
       "version": "1.0.0",
       "url": "1.0.0.json",
       "sha256": "cc1689eaee48b77289c34d9d30faf358dbadb614dae6b4ed6ff0cf0354c31f97"
+    },
+    {
+      "version": "1.1.0",
+      "url": "1.1.0.json",
+      "sha256": "e3453ea43ff832e03b3d4674555c07061fcd43a07a3d10a8c03930f9c853765c"
+    },
+    {
+      "version": "1.2.0",
+      "url": "1.2.0.json",
+      "sha256": "2ac66ae1be46569be08978d1e7bc4605830bfd66edb2dd9694b2d495f4a872f2"
     }
   ]
 }

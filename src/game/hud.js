@@ -113,10 +113,12 @@
   var selectedToolKey = '';
   var selectedTurnId = '';
   var inspectorReturnFocus = null;
+  var rawRevealState = null;
 
   var TOOL_TABS = [
     { id: 'all', label: 'All' },
     { id: 'mcp', label: 'MCP' },
+    { id: 'hooks', label: 'Hooks' },
     { id: 'skills', label: 'Skills' },
     { id: 'delegates', label: 'Sub-agents' },
     { id: 'failures', label: 'Failures' },
@@ -159,7 +161,7 @@
   }
 
   function toolKey(call) {
-    return call && (call.call_id || [call.timestamp, call.tool, call.category].join('|'));
+    return call && (call.event_ref || call.call_id || [call.timestamp, call.tool, call.category].join('|'));
   }
 
   function callKindLabel(call) {
@@ -169,6 +171,7 @@
     if (category === 'delegates') return 'Sub-agent';
     if (category === 'terminal') return 'Command';
     if (category === 'signal') return 'Web/docs';
+    if (category === 'hooks') return 'Hook';
     if (category === 'forge') return 'Edit';
     if (category === 'library') return 'Read/search';
     if (category === 'court') return 'Control';
@@ -267,6 +270,41 @@
     }).join('') + '</dl>';
   }
 
+  function activeRevealState(call) {
+    var key = toolKey(call);
+    return rawRevealState && rawRevealState.key === key ? rawRevealState : null;
+  }
+
+  function revealArgsText(state) {
+    if (!state || state.status !== 'ready') return 'hidden by privacy boundary';
+    return state.details && state.details.raw_args ? state.details.raw_args : 'not available in the retained event';
+  }
+
+  function revealOutputText(state) {
+    if (!state || state.status !== 'ready') return 'hidden by privacy boundary';
+    return state.details && state.details.raw_output ? state.details.raw_output : 'not retained by provider schema';
+  }
+
+  function renderRevealPanel(call, state) {
+    var buttonLabel = state && state.status === 'ready' ? 'Refresh raw local details' : 'Reveal raw local details';
+    var disabled = !call.event_ref || (state && state.status === 'loading');
+    var status = '';
+    if (!call.event_ref) {
+      status = '<div class="inspector-empty">Raw reveal is unavailable for this retained call.</div>';
+    } else if (state && state.status === 'loading') {
+      status = '<div class="inspector-empty">Loading raw local details...</div>';
+    } else if (state && state.status === 'error') {
+      status = '<div class="inspector-empty">Reveal failed: ' + escapeHtml(state.error || 'unknown error') + '</div>';
+    } else if (state && state.status === 'ready') {
+      status = '<div class="inspector-empty">Raw local details are visible for this selected call only.</div>';
+    }
+    return '<div class="inspector-reveal">'
+      + '<div class="inspector-reveal-warning">Raw local details may include prompts, file paths, file contents, secrets, or command output from this machine.</div>'
+      + '<button class="cmc-button accent" type="button" data-inspector-reveal ' + (disabled ? 'disabled aria-disabled="true"' : '') + '>' + escapeHtml(buttonLabel) + '</button>'
+      + status
+      + '</div>';
+  }
+
   function renderTabs() {
     if (!inspectorTabs) return;
     if (inspectorMode !== 'tools') {
@@ -320,9 +358,10 @@
     ];
     if (turn) rows.push(['Turn status', turn.status + (turn.partial ? ' · partial tail window' : '')]);
     (call.details || []).forEach(function (detail) { rows.push([detail.label, detail.value]); });
-    rows.push(['Raw args', 'hidden by privacy boundary']);
-    rows.push(['Output', 'hidden by privacy boundary']);
-    inspectorDetail.innerHTML = '<h3>Safe details</h3>' + kvRows(rows);
+    var revealState = activeRevealState(call);
+    rows.push(['Raw args', revealArgsText(revealState)]);
+    rows.push(['Output', revealOutputText(revealState)]);
+    inspectorDetail.innerHTML = '<h3>Safe details</h3>' + kvRows(rows) + renderRevealPanel(call, revealState);
   }
 
   function renderTurnList(turns, selected) {
@@ -437,6 +476,7 @@
     inspectorTab = 'all';
     selectedToolKey = '';
     selectedTurnId = '';
+    rawRevealState = null;
     inspectorOverlay.classList.add('visible');
     inspectorOverlay.setAttribute('aria-hidden', 'false');
     renderInspector();
@@ -453,7 +493,42 @@
     var wasOpen = inspectorOverlay.classList.contains('visible');
     inspectorOverlay.classList.remove('visible');
     inspectorOverlay.setAttribute('aria-hidden', 'true');
+    rawRevealState = null;
     if (wasOpen) restoreInspectorFocus();
+  }
+
+  function tauriInvoke() {
+    var internalInvoke = window.__TAURI_INTERNALS__ && window.__TAURI_INTERNALS__.invoke;
+    if (typeof internalInvoke === 'function') return internalInvoke.bind(window.__TAURI_INTERNALS__);
+    var coreInvoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+    if (typeof coreInvoke === 'function') return coreInvoke.bind(window.__TAURI__.core);
+    return null;
+  }
+
+  function revealRawDetails(call) {
+    if (!call || !call.event_ref || !inspectorSession) return;
+    var invoke = tauriInvoke();
+    var key = toolKey(call);
+    if (!invoke) {
+      rawRevealState = { key: key, status: 'error', error: 'Raw local details require the Tauri app.' };
+      renderToolDetail(call);
+      return;
+    }
+    rawRevealState = { key: key, status: 'loading' };
+    renderToolDetail(call);
+    invoke('get_raw_tool_call_details', {
+      provider: inspectorSession.provider || 'copilot',
+      sessionId: inspectorSession.id,
+      eventRef: call.event_ref,
+    }).then(function (details) {
+      if (!inspectorOverlay || !inspectorOverlay.classList.contains('visible')) return;
+      rawRevealState = { key: key, status: 'ready', details: details || {} };
+      renderToolDetail(call);
+    }).catch(function (err) {
+      if (!inspectorOverlay || !inspectorOverlay.classList.contains('visible')) return;
+      rawRevealState = { key: key, status: 'error', error: err && err.message ? err.message : String(err || 'unknown error') };
+      renderToolDetail(call);
+    });
   }
 
   window.__cmcOpenInspector = openInspector;
@@ -491,6 +566,7 @@
     var modeBtn = target.closest('[data-inspector-mode]');
     if (modeBtn) {
       inspectorMode = modeBtn.getAttribute('data-inspector-mode') || 'tools';
+      rawRevealState = null;
       renderInspector();
       return;
     }
@@ -498,13 +574,21 @@
     if (tabBtn) {
       inspectorTab = tabBtn.getAttribute('data-inspector-tab') || 'all';
       selectedToolKey = '';
+      rawRevealState = null;
       renderInspector();
       return;
     }
     var toolBtn = target.closest('[data-tool-key]');
     if (toolBtn) {
       selectedToolKey = toolBtn.getAttribute('data-tool-key') || '';
+      rawRevealState = null;
       renderInspector();
+      return;
+    }
+    var revealBtn = target.closest('[data-inspector-reveal]');
+    if (revealBtn) {
+      var call = selectedCall(filteredCalls());
+      revealRawDetails(call);
       return;
     }
     var turnBtn = target.closest('[data-turn-id]');
@@ -519,9 +603,7 @@
   // map/castle/pulses; all data-heavy chrome is regular DOM.
   // -------------------------------------------------------------------
 
-  var topbarMetrics = $('topbar-metrics');
   var domSession = $('dom-session');
-  var domWorkMix = $('dom-workmix');
   var domFeed = $('dom-feed');
   var domQuarter = $('dom-quarter');
   var domReplay = $('dom-replay');
@@ -533,7 +615,6 @@
   var schemaDriftDismiss = $('schema-drift-dismiss');
   var schemaDriftReport = $('schema-drift-report');
   var lastDashboard = null;
-  var workMixScope = 'selected';
   var activeSchemaDriftReport = null;
   var lastSchemaDriftFingerprint = '';
 
@@ -542,6 +623,7 @@
     library: '#e1ae45',
     terminal: '#86d4b7',
     signal: '#c37ee8',
+    hooks: '#61d6ff',
     delegates: '#fc60c7',
     skills: '#da58e0',
     court: '#2fc5e8',
@@ -554,7 +636,7 @@
     el.style.left = Math.round(rect.x) + 'px';
     el.style.top = Math.round(rect.y) + 'px';
     el.style.width = Math.round(rect.w) + 'px';
-    el.style.height = Math.round(rect.h) + 'px';
+    el.style.height = Number.isFinite(rect.h) ? Math.round(rect.h) + 'px' : 'auto';
   }
 
   function panelBody(el) {
@@ -565,6 +647,8 @@
     if (!kind && !category) return 'none';
     if (kind === 'tool.execution_start') return 'tool started';
     if (kind === 'tool.execution_complete') return category === 'alert' ? 'tool failed' : 'tool completed';
+    if (kind === 'hook.start') return 'hook started';
+    if (kind === 'hook.end') return category === 'alert' ? 'hook failed' : 'hook completed';
     if (kind === 'assistant.turn_start') return 'thinking started';
     if (kind === 'assistant.turn_end') return 'waiting';
     if (kind === 'user.message') return 'prompt received';
@@ -586,7 +670,7 @@
   function tokenLabel(input, output) {
     var inTok = Number(input || 0);
     var outTok = Number(output || 0);
-    return exactNumber(inTok) + '/' + exactNumber(outTok);
+    return exactNumber(inTok) + ' / ' + exactNumber(outTok);
   }
 
   function ageLabel(seconds) {
@@ -637,102 +721,6 @@
     };
   }
 
-  function renderTopbarMetrics(view) {
-    if (!topbarMetrics) return;
-    var cards = (view.summary && view.summary.cards) || [];
-    topbarMetrics.innerHTML = cards.slice(0, 4).map(function (card) {
-      var label = card.label || '';
-      var value = card.value || '0';
-      var sub = card.subCompact || card.sub || '';
-      return '<span class="topbar-metric" title="' + escapeHtml(label + (sub ? ': ' + sub : '')) + '">'
-        + '<span class="topbar-metric-label">' + escapeHtml(label) + '</span>'
-        + '<span class="topbar-metric-value" style="--metric-color:' + escapeHtml(card.color || '#ffd54a') + '">' + escapeHtml(value) + '</span>'
-        + '</span>';
-    }).join('');
-  }
-
-  function renderWorkMixRows(mix, className) {
-    var max = Math.max(1, ...mix.map(function (row) { return row.value || 0; }));
-    return '<div class="cmc-workmix ' + escapeHtml(className || '') + '"><div class="cmc-workmix-title">Activity mix</div>'
-      + mix.map(function (row) {
-        var color = CATEGORY_COLORS[row.category] || '#9aa6c8';
-        return '<div class="cmc-work-row"><span>' + escapeHtml(row.label) + '</span><div class="cmc-bar"><span style="--bar-color:' + color + ';width:' + Math.max(8, (row.value / max) * 100) + '%"></span></div><span class="cmc-muted">' + escapeHtml(row.value) + '</span></div>';
-      }).join('') + '</div>';
-  }
-
-  function mixRowsFromCounts(counts) {
-    var c = counts || {};
-    return [
-      { label: 'Read', value: Number(c.read || 0), category: 'library' },
-      { label: 'Edit', value: Number(c.write || 0), category: 'forge' },
-      { label: 'Cmd', value: Number(c.command || 0), category: 'terminal' },
-      { label: 'Web', value: Number(c.web || 0), category: 'signal' },
-      { label: 'Agent', value: Number(c.task || 0), category: 'delegates' },
-      { label: 'MCP', value: Number(c.mcp || 0), category: 'mcp' },
-    ];
-  }
-
-  function aggregateSessionMix(options, activeOnly) {
-    var base = { read: 0, write: 0, command: 0, web: 0, task: 0, mcp: 0 };
-    var list = (options || []).filter(function (opt) {
-      return !activeOnly || !!opt.isActive;
-    });
-    if (!list.length && activeOnly) list = options || [];
-    list.forEach(function (opt) {
-      var mix = opt.mix || {};
-      base.read += Number(mix.read || 0);
-      base.write += Number(mix.write || 0);
-      base.command += Number(mix.command || 0);
-      base.web += Number(mix.web || 0);
-      base.task += Number(mix.task || 0);
-      base.mcp += Number(mix.mcp || 0);
-    });
-    return mixRowsFromCounts(base);
-  }
-
-  function renderWorkMixPanel(view) {
-    var body = panelBody(domWorkMix);
-    if (!body) return;
-    var options = (view.sessions && view.sessions.options) || [];
-    var selected = view.sessions && view.sessions.selected;
-    var selectedOption = selected
-      ? options.find(function (opt) { return opt.id === selected.id; })
-      : null;
-
-    if (workMixScope === 'selected' && !selectedOption) workMixScope = 'running';
-    if (workMixScope.indexOf('session:') === 0) {
-      var id = workMixScope.slice('session:'.length);
-      if (!options.some(function (opt) { return opt.id === id; })) workMixScope = 'running';
-    }
-
-    var mixRows = (view.summary && view.summary.workMix) || [];
-    if (workMixScope === 'selected' && selectedOption) {
-      mixRows = mixRowsFromCounts(selectedOption.mix);
-    } else if (workMixScope === 'running') {
-      mixRows = aggregateSessionMix(options, true);
-    } else if (workMixScope.indexOf('session:') === 0) {
-      var scopedId = workMixScope.slice('session:'.length);
-      var scoped = options.find(function (opt) { return opt.id === scopedId; });
-      mixRows = mixRowsFromCounts(scoped && scoped.mix);
-    }
-
-    var choices = [
-      '<option value="running"' + (workMixScope === 'running' ? ' selected' : '') + '>Running sessions (combined)</option>',
-    ];
-    if (selectedOption) {
-      choices.unshift('<option value="selected"' + (workMixScope === 'selected' ? ' selected' : '') + '>Selected session</option>');
-    }
-    options.forEach(function (opt) {
-      choices.push('<option value="session:' + escapeHtml(opt.id) + '"' + (workMixScope === 'session:' + opt.id ? ' selected' : '') + '>'
-        + escapeHtml((opt.title || opt.id) + ' · ' + (opt.shortId || opt.id.slice(0, 8)))
-        + '</option>');
-    });
-
-    body.innerHTML = '<div class="cmc-workmix-controls"><label class="cmc-muted" for="workmix-scope-select">Scope</label>'
-      + '<select id="workmix-scope-select" class="cmc-select" data-cmc-action="workmix-scope">' + choices.join('') + '</select></div>'
-      + renderWorkMixRows(mixRows, '');
-  }
-
   function renderSession(view) {
     var body = panelBody(domSession);
     if (!body) return;
@@ -772,7 +760,7 @@
         + '</div>'
         + '<div class="cmc-actions">'
         + '<button class="cmc-button accent ' + (hasGitRoot ? '' : 'disabled') + '" aria-label="Open selected session in editor" ' + (hasGitRoot ? 'data-cmc-action="editor"' : 'disabled aria-disabled="true"') + '>↗ Open in Editor</button>'
-        + '<button class="cmc-button ' + (tcalls > 0 ? '' : 'disabled') + '" aria-label="Open inspector for selected session" ' + (tcalls > 0 ? 'data-cmc-action="inspector"' : 'disabled aria-disabled="true"') + '>Inspector (' + tcalls + ')</button>'
+        + '<button class="cmc-button ' + (tcalls > 0 ? '' : 'disabled') + '" aria-label="Open inspector for selected session" ' + (tcalls > 0 ? 'data-cmc-action="inspector"' : 'disabled aria-disabled="true"') + '>Inspector</button>'
         + '</div>';
     }
     body.innerHTML = picker + selectedHtml;
@@ -806,8 +794,7 @@
     domQuarter.style.setProperty('--quarter-color', q.color || CATEGORY_COLORS[q.category] || '#ffd54a');
     body.innerHTML = '<div class="cmc-quarter-line">' + escapeHtml(q.countLine) + '</div>'
       + '<div class="cmc-quarter-line">' + escapeHtml(q.line) + '</div>'
-      + (q.toolList ? '<div class="cmc-quarter-tools cmc-muted">' + escapeHtml(q.toolList) + '</div>' : '')
-      + (q.footer ? '<div class="cmc-quarter-footer ' + (q.footerAlert ? 'cmc-footer-alert' : 'cmc-footer-info') + '">' + escapeHtml(q.footer) + '</div>' : '');
+      + (q.toolList ? '<div class="cmc-quarter-tools cmc-muted">' + escapeHtml(q.toolList) + '</div>' : '');
   }
 
   function renderQuarter(view) {
@@ -973,27 +960,25 @@
     var columnBottom = Math.max(l.topY || 0, replayTop - columnGap);
     var columnH = Math.max(0, columnBottom - (l.topY || 0));
     var feedMinH = l.compact ? 130 : 160;
-    var workmixH = l.compact ? 232 : 244;
-    var sessionMainH = l.compact ? 244 : 270;
-    var maxSessionH = columnH - workmixH - feedMinH - columnGap * 2;
-    if (maxSessionH < sessionMainH) {
-      sessionMainH = Math.max(l.compact ? 218 : 238, maxSessionH);
+    var maxSessionH = Math.max(l.compact ? 160 : 180, columnH - feedMinH - columnGap);
+    if (domSession) {
+      domSession.classList.remove('hidden', 'constrained');
     }
-    var workmixY = (l.topY || 0) + sessionMainH + columnGap;
-    var feedY = workmixY + workmixH + columnGap;
+    setPanelRect(domSession, { x: l.leftX, y: l.topY, w: l.panelW });
+    renderSession(view);
+    var naturalSessionH = domSession ? Math.ceil(domSession.getBoundingClientRect().height) : 0;
+    var sessionMainH = Math.max(0, Math.min(naturalSessionH || maxSessionH, maxSessionH));
+    var feedY = (l.topY || 0) + sessionMainH + columnGap;
     var feedH = Math.max(80, columnBottom - feedY);
     setPanelRect(domSession, { x: l.leftX, y: l.topY, w: l.panelW, h: sessionMainH });
-    setPanelRect(domWorkMix, { x: l.leftX, y: workmixY, w: l.panelW, h: workmixH });
+    if (domSession) domSession.classList.toggle('constrained', naturalSessionH > sessionMainH + 1);
     setPanelRect(domFeed, { x: l.leftX, y: feedY, w: l.panelW, h: feedH });
     setPanelRect(domQuarter, { x: l.bottomX, y: l.bottomY, w: l.bottomW, h: l.bottomH });
     setPanelRect(domReplay, { x: l.replayX, y: l.replayY, w: l.replayW, h: l.replayH });
-    [domSession, domWorkMix, domFeed, domReplay].forEach(function (el) {
+    [domSession, domFeed, domReplay].forEach(function (el) {
       if (el) el.classList.toggle('hidden', hideSides);
     });
     if (domQuarter) domQuarter.classList.toggle('hidden', false);
-    renderTopbarMetrics(view);
-    renderSession(view);
-    renderWorkMixPanel(view);
     renderFeed(view);
     renderQuarter(view);
     renderReplay(view);
@@ -1076,19 +1061,14 @@
   document.addEventListener('change', function (event) {
     var target = event.target;
     if (!target || !target.matches) return;
-    if (target.matches('[data-cmc-action="workmix-scope"]')) {
-      workMixScope = target.value || 'running';
-      if (lastDashboard) renderWorkMixPanel(lastDashboard);
-      return;
-    }
     if (target.matches('[data-cmc-action="session-select"]') && typeof window.__cmcSelectSession === 'function') {
       window.__cmcSelectSession(target.value);
     }
   });
 
   // -------------------------------------------------------------------
-  // Panels toggle — hide/show the Summary + Selected Session + Activity
-  // Feed side panels so the castle/buildings ring can expand to take up
+  // Panels toggle — hide/show the Selected Session + Activity Feed side
+  // panels so the castle/buildings ring can expand to take up
   // the full width. The quarter inspector below the buildings + the
   // replay timeline stay visible so hover/click behavior + scrubber
   // controls keep working in focus mode.

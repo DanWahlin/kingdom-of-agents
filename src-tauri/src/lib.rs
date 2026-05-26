@@ -22,7 +22,7 @@ use tauri::{
 };
 use tauri_plugin_window_state::StateFlags;
 
-use agent::{collect_agent_activity, AgentActivity};
+use agent::{collect_agent_activity, AgentActivity, RawToolCallDetails};
 
 // Icons baked into the binary so they survive whether the binary is
 // launched bare (`tauri dev`) or wrapped in an .app bundle (`tauri build`).
@@ -93,6 +93,18 @@ fn get_agent_activity() -> AgentActivity {
 #[tauri::command]
 fn get_copilot_activity() -> AgentActivity {
     collect_agent_activity()
+}
+
+/// Explicit local-only raw reveal for one inspector row. The normal
+/// activity command remains privacy-safe; this only runs after the user
+/// clicks the Inspector reveal action.
+#[tauri::command]
+fn get_raw_tool_call_details(
+    provider: Option<String>,
+    session_id: String,
+    event_ref: String,
+) -> Result<RawToolCallDetails, String> {
+    agent::get_raw_tool_call_details(provider, session_id, event_ref)
 }
 
 /// Open the given filesystem path in an external editor by shelling out
@@ -207,6 +219,7 @@ pub fn run() {
             hide_app,
             get_agent_activity,
             get_copilot_activity,
+            get_raw_tool_call_details,
             open_in_editor,
             open_external_url
         ])

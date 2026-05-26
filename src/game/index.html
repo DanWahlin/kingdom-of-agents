@@ -63,47 +63,6 @@
       color: #1e3a5f;
       text-shadow: none;
     }
-    #topbar-metrics {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 0 1 auto;
-      min-width: 0;
-      overflow: hidden;
-    }
-    .topbar-metric {
-      display: inline-flex;
-      align-items: baseline;
-      gap: 6px;
-      max-width: 150px;
-      padding: 4px 9px;
-      border: 1px solid rgba(127, 151, 239, 0.36);
-      border-radius: 999px;
-      background: rgba(16, 24, 51, 0.72);
-      color: #e8ecff;
-      white-space: nowrap;
-    }
-    .topbar-metric-label {
-      color: #93a4d8;
-      font-size: 9px;
-      letter-spacing: 0.07em;
-      text-transform: uppercase;
-    }
-    .topbar-metric-value {
-      color: var(--metric-color, #ffd54a);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 0.03em;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    body.theme-light .topbar-metric {
-      background: #f8fafc;
-      border-color: #cbd5e1;
-      color: #334155;
-    }
-    body.theme-light .topbar-metric-label { color: #64748b; }
     #topbar-controls {
       margin-left: auto;
       display: inline-flex;
@@ -221,12 +180,10 @@
         font-size: 12px;
       }
       #topbar .brand { max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
-      .topbar-metric { max-width: 118px; padding: 4px 7px; gap: 4px; }
       #model-chip { max-width: 170px; }
     }
     @media (max-width: 1040px) {
       #model-chip { max-width: 120px; }
-      .topbar-metric { max-width: 104px; }
     }
 
     /* HTML inspector overlay. Phaser still owns the mission map; this
@@ -471,6 +428,24 @@
       overflow-wrap: anywhere;
     }
     body.theme-light .inspector-kv dt { color: #64748b; }
+    .inspector-reveal {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      border: 1px solid rgba(255, 213, 74, 0.28);
+      border-radius: 10px;
+      background: rgba(255, 213, 74, 0.08);
+    }
+    .inspector-reveal-warning {
+      color: #ffd54a;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    body.theme-light .inspector-reveal {
+      border-color: rgba(180, 83, 9, 0.22);
+      background: #fff7ed;
+    }
+    body.theme-light .inspector-reveal-warning { color: #92400e; }
     .inspector-related-title {
       color: #ffd54a;
       font-weight: 700;
@@ -661,18 +636,6 @@
     .cmc-label, .cmc-muted { color: #93a4d8; }
     body.theme-light .cmc-label, body.theme-light .cmc-muted { color: #64748b; }
     .cmc-label { font-size: 12px; line-height: 1.4; }
-    #dom-workmix .cmc-panel-body {
-      overflow: hidden;
-    }
-    .cmc-workmix { min-height: 0; margin-top: 0; }
-    .cmc-workmix-controls {
-      display: grid;
-      grid-template-columns: auto 1fr;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 8px;
-      font-size: 10px;
-    }
     .cmc-select {
       min-width: 0;
       height: 28px;
@@ -689,18 +652,6 @@
       color: #1f2937;
       border-color: #cbd5e1;
     }
-    .cmc-workmix-title { font-size: 12px; margin-bottom: 6px; color: #93a4d8; }
-    .cmc-work-row {
-      display: grid;
-      grid-template-columns: 58px 1fr 34px;
-      gap: 10px;
-      align-items: center;
-      margin: 3px 0;
-      font-size: 11px;
-      line-height: 1.1;
-    }
-    .cmc-bar { height: 10px; border-radius: 999px; background: #1a2448; overflow: hidden; }
-    .cmc-bar span { display: block; height: 100%; min-width: 12px; border-radius: 999px; background: var(--bar-color, #61d6ff); }
     .cmc-feed-row {
       width: 100%;
       border: 1px solid rgba(127, 151, 239, 0.44);
@@ -764,7 +715,8 @@
     }
     .cmc-session-meta {
       display: flex;
-      flex-wrap: wrap;
+      flex-direction: column;
+      align-items: flex-start;
       gap: 6px;
       font-size: 10px;
       line-height: 1.25;
@@ -812,14 +764,14 @@
       padding-bottom: 10px;
     }
     #dom-session .cmc-panel-body {
+      height: auto;
       overflow-y: hidden;
     }
-    @media (max-height: 820px) {
-      #dom-session .cmc-panel-body {
-        overflow-y: auto;
-        scrollbar-gutter: stable;
-        padding-right: 8px;
-      }
+    #dom-session.constrained .cmc-panel-body {
+      height: 100%;
+      overflow-y: auto;
+      scrollbar-gutter: stable;
+      padding-right: 8px;
     }
     .cmc-feed-list { display: grid; gap: 8px; padding-bottom: 10px; }
     .cmc-feed-row { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center; font-size: 11px; min-height: 26px; }
@@ -899,9 +851,6 @@
     }
     .cmc-quarter-line { font-size: 12px; line-height: 1.55; margin: 0; }
     .cmc-quarter-tools { font-size: 11px; line-height: 1.45; margin-top: 2px; }
-    .cmc-quarter-footer { margin-top: auto; font-size: 11px; line-height: 1.4; }
-    .cmc-footer-alert { color: #ff8a8a; }
-    .cmc-footer-info { color: #7f97ef; }
     #dom-quarter {
       border-color: color-mix(in srgb, var(--quarter-color, #ffd54a) 60%, rgba(28, 39, 80, 0.9));
       box-shadow:
@@ -941,7 +890,6 @@
 <body>
   <div id="topbar">
     <span class="brand">Copilot Mission Control</span>
-    <span id="topbar-metrics" aria-label="Live session metrics"></span>
     <span id="topbar-controls">
       <span id="model-chip" class="empty" title="Active model for the selected session"></span>
       <button id="panels-btn" type="button" title="Hide side panels for focus mode" aria-label="Hide side panels for focus mode"></button>
@@ -958,7 +906,6 @@
   </div>
   <div id="dashboard-overlay" aria-label="Mission Control dashboard">
     <section id="dom-session" class="cmc-panel"><div class="cmc-panel-title">Selected Session</div><div class="cmc-panel-body"></div></section>
-    <section id="dom-workmix" class="cmc-panel"><div class="cmc-panel-title">Activity Mix</div><div class="cmc-panel-body"></div></section>
     <section id="dom-feed" class="cmc-panel"><div class="cmc-panel-title">Recent Activity Feed</div><div class="cmc-panel-body"></div></section>
     <section id="dom-quarter" class="cmc-panel" aria-live="polite"><div class="cmc-panel-title">Sector</div><div class="cmc-panel-body"></div></section>
     <section id="dom-replay" class="cmc-panel"></section>

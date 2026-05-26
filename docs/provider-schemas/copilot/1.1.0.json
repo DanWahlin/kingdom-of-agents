@@ -1,5 +1,5 @@
 {
-  "schema_version": "1.2.0",
+  "schema_version": "1.1.0",
   "provider": "copilot",
   "state_root": [".copilot", "session-state"],
   "session": {
@@ -26,17 +26,12 @@
     "model_paths": ["data.model"],
     "tool_name_paths": ["data.toolName"],
     "arguments_paths": ["data.arguments"],
-    "output_paths": ["data.output", "data.result", "data.error"],
     "success_paths": ["data.success"],
     "output_token_paths": ["data.outputTokens"],
     "turn_id_paths": ["data.turnId", "data.turn_id"],
     "tool_call_id_paths": ["data.toolCallId", "data.tool_call_id"],
     "hook_name_paths": ["data.hookType"],
     "hook_invocation_id_paths": ["data.hookInvocationId"]
-  },
-  "hooks": {
-    "config_path": [".copilot", "hooks", "hooks.json"],
-    "hook_types_path": "hooks"
   },
   "token_events": [
     {
