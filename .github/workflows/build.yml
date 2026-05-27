@@ -147,8 +147,9 @@ jobs:
             | File | Description |
             |------|-------------|
             | `*.msi` | Windows installer (x64) |
+            | `*.exe` | Windows setup executable (x64) |
 
-            > Download the `.msi` file from the **Assets** list below.
+            > Download the `.msi` or `.exe` file from the **Assets** list below.
             >
             > **Note:** The app is not code-signed, so Windows may flag it:
             > 1. If your browser warns about the download, select **"Keep"**
@@ -160,16 +161,17 @@ jobs:
             |------|-------------|
             | `*.AppImage` | Universal Linux (run anywhere) |
             | `*.deb` | Debian/Ubuntu package |
+            | `*.rpm` | Fedora/RHEL package |
 
-            > Download the `.AppImage` or `.deb` file from the **Assets** list below.
+            > Download the `.AppImage`, `.deb`, or `.rpm` file from the **Assets** list below.
             >
             > **Note:** For the AppImage, make it executable first:
             > ```
-            > chmod +x Copilot-Mission-Control_*.AppImage
-            > ./Copilot-Mission-Control_*.AppImage
+            > chmod +x Copilot.Mission.Control_*.AppImage
+            > ./Copilot.Mission.Control_*.AppImage
             > ```
 
             ---
-            *Built with Tauri + Phaser + TypeScript.*
+            *A live mission-control dashboard for your GitHub Copilot CLI sessions — built with Tauri + Phaser + TypeScript.*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
