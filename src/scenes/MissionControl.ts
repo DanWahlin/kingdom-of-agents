@@ -75,6 +75,7 @@ declare global {
     __cmcRenderLiveDashboard?: (view: unknown) => void;
     __cmcRenderQuarter?: (quarter: unknown) => void;
     __cmcResetActivityStats?: () => void;
+    __cmcFetchHistory?: () => void;
     __cmcSelectSession?: (id: string) => void;
     __cmcOpenSelectedSessionInEditor?: () => void;
     __cmcToggleReplayPause?: () => void;
@@ -119,7 +120,9 @@ const LIGHT_THEME: MissionTheme = {
 let theme: MissionTheme = DARK_THEME;
 
 function setActiveTheme(mode: ThemeMode) {
+  if (theme.mode === mode) return false;
   theme = mode === 'light' ? LIGHT_THEME : DARK_THEME;
+  return true;
 }
 
 function loadInitialThemeMode(): ThemeMode {
@@ -334,6 +337,7 @@ export class MissionControlScene extends Phaser.Scene {
   private pollEvent?: any;
   private startupRetryEvents: any[] = [];
   private loading = false;
+  private pendingHistoryRefresh = false;
   /// True once the scene has finished its bootstrap ingest. The
   /// initial snapshot of `recent_events` is HISTORICAL — those events
   /// have already been counted by the Rust scanner and are present in
@@ -401,6 +405,8 @@ export class MissionControlScene extends Phaser.Scene {
   private renderPending = false;
   private lastFullRenderAt = 0;
   private lastLiveDashboardPublishAt = 0;
+  private deferredThemeRenderEvent: any = null;
+  private deferredThemeRenderKind: 'map' | 'full' = 'map';
   private pushRefreshEvent: any = null;
   private pendingPushRefresh = false;
   private lastPushRefreshAt = 0;
@@ -455,8 +461,8 @@ export class MissionControlScene extends Phaser.Scene {
     this.ensurePulseTextures();
     this.createPulseVisualPools();
     this.moatPulseRings = [
-      this.createPooledImage(ARRIVAL_RING_TEXTURE_KEY).setDepth(2),
-      this.createPooledImage(ARRIVAL_RING_TEXTURE_KEY).setDepth(2),
+      this.createPooledImage(ARRIVAL_RING_TEXTURE_KEY, Phaser.BlendModes.NORMAL).setDepth(2),
+      this.createPooledImage(ARRIVAL_RING_TEXTURE_KEY, Phaser.BlendModes.NORMAL).setDepth(2),
     ];
 
     // Restore last-session prefs so context survives a window restart.
@@ -504,16 +510,15 @@ export class MissionControlScene extends Phaser.Scene {
     };
     window.__cmcSetTheme = (mode: ThemeMode) => {
       if (!this.scene?.isActive?.()) return;
-      setActiveTheme(mode);
-      this.redrawBackdrop();
-      this.renderActivity();
+      if (!setActiveTheme(mode)) return;
+      this.scheduleDeferredThemeRender('map');
     };
     window.__cmcSetAppTheme = (nextTheme: AppTheme) => {
       if (!this.scene?.isActive?.()) return;
       const normalized = normalizeAppTheme(nextTheme);
       if (normalized === this.appTheme) return;
       this.appTheme = normalized;
-      this.renderActivity();
+      this.scheduleDeferredThemeRender('full');
     };
     // Focus-mode toggle. Hides side panels and re-lays-out the ring so
     // the castle + quarters expand to fill the canvas. Idempotent —
@@ -538,6 +543,10 @@ export class MissionControlScene extends Phaser.Scene {
     window.__cmcResetActivityStats = () => {
       if (!this.scene?.isActive?.()) return;
       this.resetActivityStats();
+    };
+    window.__cmcFetchHistory = () => {
+      if (!this.scene?.isActive?.()) return;
+      void this.refreshActivity(true, true);
     };
     window.__cmcOpenSelectedSessionInEditor = () => {
       if (!this.scene?.isActive?.()) return;
@@ -635,6 +644,21 @@ export class MissionControlScene extends Phaser.Scene {
     this.renderActivity();
   }
 
+  private scheduleDeferredThemeRender(kind: 'map' | 'full') {
+    if (kind === 'full') this.deferredThemeRenderKind = 'full';
+    if (this.deferredThemeRenderEvent) return;
+    this.deferredThemeRenderKind = kind === 'full' ? 'full' : this.deferredThemeRenderKind;
+    this.deferredThemeRenderEvent = this.time.delayedCall(0, () => {
+      const renderKind = this.deferredThemeRenderKind;
+      this.deferredThemeRenderEvent = null;
+      this.deferredThemeRenderKind = 'map';
+      if (!this.scene?.isActive?.()) return;
+      this.redrawBackdrop();
+      if (renderKind === 'full') this.renderActivity();
+      else this.renderMapOnly();
+    });
+  }
+
   private schedulePushRefresh() {
     if (this.pendingPushRefresh) return;
     this.pendingPushRefresh = true;
@@ -704,6 +728,10 @@ export class MissionControlScene extends Phaser.Scene {
       this.pushRefreshEvent.remove(false);
       this.pushRefreshEvent = null;
     }
+    if (this.deferredThemeRenderEvent) {
+      this.deferredThemeRenderEvent.remove(false);
+      this.deferredThemeRenderEvent = null;
+    }
     for (const evt of this.startupRetryEvents) {
       evt?.remove?.(false);
     }
@@ -729,6 +757,7 @@ export class MissionControlScene extends Phaser.Scene {
     window.__cmcOpenSelectedSessionInEditor = undefined;
     window.__cmcRenderLiveDashboard = undefined;
     window.__cmcResetActivityStats = undefined;
+    window.__cmcFetchHistory = undefined;
     window.__cmcToggleReplayPause = undefined;
     window.__cmcJumpReplayToLive = undefined;
     window.__cmcSeekReplayRatio = undefined;
@@ -744,6 +773,7 @@ export class MissionControlScene extends Phaser.Scene {
     this.arrivalEffects = [];
     this.activeEventPulseCount = 0;
     this.renderPending = false;
+    this.deferredThemeRenderKind = 'map';
     this.pendingPushRefresh = false;
     this.lastPushRefreshAt = 0;
     this.eventLog = [];
@@ -1013,8 +1043,16 @@ export class MissionControlScene extends Phaser.Scene {
     this.renderActivity();
   }
 
-  private async refreshActivity(force = false) {
-    if (this.loading) return;
+  private isHistoryRouteActive() {
+    return document.body.classList.contains('history-route')
+      || String(window.location.hash || '').toLowerCase() === '#history';
+  }
+
+  private async refreshActivity(force = false, includeHistory = this.isHistoryRouteActive()) {
+    if (this.loading) {
+      if (includeHistory) this.pendingHistoryRefresh = true;
+      return;
+    }
     // De-dupe rapid back-to-back calls (e.g. watcher push + poll tick at
     // nearly the same time). Forced calls (initial mount, startup
     // retries, push handler) always go through.
@@ -1029,7 +1067,8 @@ export class MissionControlScene extends Phaser.Scene {
         const ti = (window as any).__TAURI_INTERNALS__;
         if (ti?.invoke) {
           try {
-            this.setActivity(await ti.invoke('get_agent_activity') as CopilotActivity);
+            const command = includeHistory ? 'get_agent_activity_with_history' : 'get_agent_activity';
+            this.setActivity(await ti.invoke(command) as CopilotActivity);
           } catch {
             this.setActivity(createEmptyActivity());
           }
@@ -1042,6 +1081,12 @@ export class MissionControlScene extends Phaser.Scene {
       this.requestRender(force && this.bootstrapCompleted && appended > 0 ? 'live' : 'normal');
     } finally {
       this.loading = false;
+      if (includeHistory) {
+        this.pendingHistoryRefresh = false;
+      } else if (this.pendingHistoryRefresh && this.scene?.isActive?.()) {
+        this.pendingHistoryRefresh = false;
+        void this.refreshActivity(true, true);
+      }
     }
   }
 
@@ -1413,7 +1458,7 @@ export class MissionControlScene extends Phaser.Scene {
   /// Selected-session stats for the quarter inspector: top tool,
   /// selected-session call count, average duration (when we have
   /// completed entries), and a short tool list.
-  private computeQuarterStats(key: string): { line: string; toolList: string | null } {
+  private computeQuarterStats(key: string): { line: string } {
     const session = this.selectedSession;
     const callCounts = new Map<string, number>();
     for (const call of session?.recent_tool_calls ?? []) {
@@ -1442,10 +1487,7 @@ export class MissionControlScene extends Phaser.Scene {
     if (avgMs > 0) parts.push(`avg ${formatDuration(avgMs)}`);
     const line = parts.length > 0 ? parts.join(' · ') : 'No activity routed here yet.';
 
-    const toolList = tools.length > 1
-      ? `Also: ${tools.slice(1).map(t => `${t.name} (${t.count})`).join(', ')}`
-      : null;
-    return { line, toolList };
+    return { line };
   }
 
   private buildQuarterView() {

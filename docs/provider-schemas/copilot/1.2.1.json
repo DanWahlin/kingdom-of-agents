@@ -32,7 +32,9 @@
     "turn_id_paths": ["data.turnId", "data.turn_id"],
     "tool_call_id_paths": ["data.toolCallId", "data.tool_call_id"],
     "hook_name_paths": ["data.hookType"],
-    "hook_invocation_id_paths": ["data.hookInvocationId"]
+    "hook_invocation_id_paths": ["data.hookInvocationId"],
+    "hook_input_paths": ["data.input"],
+    "hook_output_paths": ["data.output", "data.result", "data.error"]
   },
   "hooks": {
     "config_path": [".copilot", "hooks", "hooks.json"],

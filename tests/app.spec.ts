@@ -29,18 +29,83 @@ test.describe('Copilot Mission Control app shell', () => {
       return {
         routeGroupBorderWidth: routeGroupStyle.borderTopWidth,
         routeBorderColor: missionRouteStyle.borderTopColor,
+        routeBackgroundImage: missionRouteStyle.backgroundImage,
         routeBoxShadow: missionRouteStyle.boxShadow,
         resetIconWidth: getComputedStyle(resetSvg).width,
         resetPaths,
       };
     });
-    expect(topbarIconStyles).toEqual({
-      routeGroupBorderWidth: '0px',
-      routeBorderColor: 'rgba(0, 0, 0, 0)',
-      routeBoxShadow: 'none',
-      resetIconWidth: '18px',
-      resetPaths: ['M5 12a7 7 0 1 0 2.1-5', 'M5 4v4.7h4.7'],
+    expect(topbarIconStyles.routeGroupBorderWidth).toBe('0px');
+    expect(topbarIconStyles.routeBorderColor).toBe('rgba(0, 0, 0, 0)');
+    expect(topbarIconStyles.routeBackgroundImage).not.toBe('none');
+    expect(topbarIconStyles.routeBoxShadow).not.toBe('none');
+    expect(topbarIconStyles.resetIconWidth).toBe('18px');
+    expect(topbarIconStyles.resetPaths).toEqual(['M5 12a7 7 0 1 0 2.1-5', 'M5 4v4.7h4.7']);
+  });
+
+  test('top bar route buttons visually mark the active route in both themes', async ({ page }) => {
+    const darkActiveColor = 'rgb(184, 255, 207)';
+    const lightActiveColor = 'rgb(22, 101, 52)';
+    const routeStyles = async () => page.evaluate(() => {
+      const mission = document.querySelector('#mission-route-btn') as HTMLElement;
+      const history = document.querySelector('#history-route-btn') as HTMLElement;
+      const missionStyle = getComputedStyle(mission);
+      const historyStyle = getComputedStyle(history);
+      return {
+        missionCurrent: mission.getAttribute('aria-current'),
+        historyCurrent: history.getAttribute('aria-current'),
+        missionBackgroundImage: missionStyle.backgroundImage,
+        historyBackgroundImage: historyStyle.backgroundImage,
+        missionColor: missionStyle.color,
+        historyColor: historyStyle.color,
+      };
     });
+
+    const initial = await routeStyles();
+    expect(initial.missionCurrent).toBe('page');
+    expect(initial.historyCurrent).toBeNull();
+    expect(initial.missionBackgroundImage).not.toBe('none');
+    expect(initial.historyBackgroundImage).toBe('none');
+    expect(initial.missionColor).toBe(darkActiveColor);
+
+    await page.locator('#history-route-btn').click();
+    await expect.poll(async () => (await routeStyles()).historyColor).toBe(darkActiveColor);
+    const darkHistory = await routeStyles();
+    expect(darkHistory.missionCurrent).toBeNull();
+    expect(darkHistory.historyCurrent).toBe('page');
+    expect(darkHistory.missionBackgroundImage).toBe('none');
+    expect(darkHistory.historyBackgroundImage).not.toBe('none');
+    expect(darkHistory.historyBackgroundImage).toBe(initial.missionBackgroundImage);
+    expect(darkHistory.historyColor).toBe(initial.missionColor);
+
+    await page.locator('#theme-btn').click();
+    await expect.poll(async () => (await routeStyles()).historyColor).toBe(lightActiveColor);
+    const lightHistory = await routeStyles();
+    expect(lightHistory.historyCurrent).toBe('page');
+    expect(lightHistory.historyBackgroundImage).not.toBe('none');
+    expect(lightHistory.historyColor).toBe(lightActiveColor);
+
+    await page.locator('#mission-route-btn').click();
+    await expect.poll(async () => (await routeStyles()).missionColor).toBe(lightActiveColor);
+    const lightMission = await routeStyles();
+    expect(lightMission.missionCurrent).toBe('page');
+    expect(lightMission.historyCurrent).toBeNull();
+    expect(lightMission.missionBackgroundImage).not.toBe('none');
+    expect(lightMission.historyBackgroundImage).toBe('none');
+    expect(lightMission.missionBackgroundImage).toBe(lightHistory.historyBackgroundImage);
+    expect(lightMission.missionColor).toBe(lightHistory.historyColor);
+  });
+
+  test('history dashboard unloads when returning to home', async ({ page }) => {
+    await page.locator('#history-route-btn').click();
+    await expect.poll(() => page.locator('#history-content').evaluate((el) => el.innerHTML.length)).toBeGreaterThan(0);
+    await expect(page.locator('body')).toHaveClass(/history-route/);
+
+    await page.locator('#mission-route-btn').click();
+    await expect(page.locator('body')).not.toHaveClass(/history-route/);
+    await expect.poll(() => page.locator('#history-content').evaluate((el) => el.innerHTML)).toBe('');
+    await expect.poll(() => page.locator('#history-kpi-summary').evaluate((el) => el.innerHTML)).toBe('');
+    await expect(page.locator('#history-session-filter')).toBeDisabled();
   });
 
   test('theme toggle persists to localStorage and flips body class', async ({ page }) => {

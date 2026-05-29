@@ -31,6 +31,7 @@
 
   var themeBtn = $('theme-btn');
   var currentTheme = safeGet('cmc_theme') === 'light' ? 'light' : 'dark';
+  var lastSceneTheme = null;
 
   function applyTheme() {
     var isLight = currentTheme === 'light';
@@ -42,6 +43,8 @@
       themeBtn.setAttribute('aria-label', themeBtn.title);
     }
     if (typeof window.__cmcSetTheme === 'function') {
+      if (lastSceneTheme === currentTheme) return;
+      lastSceneTheme = currentTheme;
       window.__cmcSetTheme(currentTheme);
     }
   }
@@ -81,6 +84,7 @@
   var APP_THEME_KEY = 'cmc_app_theme';
   var DEFAULT_APP_THEME = 'space';
   var APP_THEMES = ['space', 'medieval'];
+  var lastSceneAppTheme = null;
 
   function normalizeAppTheme(value) {
     return APP_THEMES.indexOf(value) >= 0 ? value : DEFAULT_APP_THEME;
@@ -92,6 +96,8 @@
     if (appThemeSelect && appThemeSelect.value !== nextTheme) appThemeSelect.value = nextTheme;
     safeSet(APP_THEME_KEY, nextTheme);
     if (typeof window.__cmcSetAppTheme === 'function') {
+      if (lastSceneAppTheme === nextTheme) return;
+      lastSceneAppTheme = nextTheme;
       window.__cmcSetAppTheme(nextTheme);
     }
   }
@@ -369,12 +375,19 @@
 
   function revealArgsText(state) {
     if (!state || state.status !== 'ready') return 'hidden by privacy boundary';
-    return state.details && state.details.raw_args ? state.details.raw_args : 'not available in the retained event';
+    if (!state.details || !state.details.raw_args) return 'not available in the retained event';
+    return state.details.raw_args + (state.details.raw_args_truncated ? '\n\n[truncated]' : '');
   }
 
   function revealOutputText(state) {
     if (!state || state.status !== 'ready') return 'hidden by privacy boundary';
-    return state.details && state.details.raw_output ? state.details.raw_output : 'not retained by provider schema';
+    if (!state.details) return 'not retained by provider schema';
+    if (state.details.raw_output) {
+      return state.details.raw_output + (state.details.raw_output_truncated ? '\n\n[truncated]' : '');
+    }
+    return state.details.raw_output_scan_limited
+      ? 'not found within the retained scan window'
+      : 'not retained by provider schema';
   }
 
   function hasRawDetailPayload(details) {
@@ -829,6 +842,8 @@
     history: '',
   };
   var appRoute = routeFromHash();
+  var historyFetchFrame = 0;
+  var historyFetchTimer = 0;
 
   function nowMs() {
     return window.performance && typeof window.performance.now === 'function'
@@ -858,6 +873,44 @@
     else button.removeAttribute('aria-current');
   }
 
+  function dashboardHasLoadedHistory(view) {
+    return !!(view && view.history && Number(view.history.generated_at_ms || 0) > 0);
+  }
+
+  function cancelScheduledHistoryFetch() {
+    if (historyFetchFrame) {
+      window.cancelAnimationFrame(historyFetchFrame);
+      historyFetchFrame = 0;
+    }
+    if (historyFetchTimer) {
+      window.clearTimeout(historyFetchTimer);
+      historyFetchTimer = 0;
+    }
+  }
+
+  function scheduleHistoryFetch() {
+    if (historyFetchFrame || historyFetchTimer) return;
+    historyFetchFrame = window.requestAnimationFrame(function () {
+      historyFetchFrame = 0;
+      historyFetchTimer = window.setTimeout(function () {
+        historyFetchTimer = 0;
+        if (appRoute !== 'history') return;
+        if (typeof window.__cmcFetchHistory === 'function') window.__cmcFetchHistory();
+      }, 0);
+    });
+  }
+
+  function unloadHistoryRoute() {
+    cancelScheduledHistoryFetch();
+    liveFingerprints.history = '';
+    openHistoryFailureKeys.clear();
+    if (historyLiveStamp) historyLiveStamp.textContent = 'Open History to load analytics';
+    if (historyKpiSummary) historyKpiSummary.innerHTML = '';
+    if (historyContent) historyContent.innerHTML = '';
+    if (historyScreen) historyScreen.scrollTop = 0;
+    updateHistorySessionFilter(null);
+  }
+
   function applyAppRoute(route, options) {
     var next = route === 'history' ? 'history' : 'mission';
     var previous = appRoute;
@@ -871,11 +924,17 @@
     });
     if (!options || options.syncHash !== false) syncRouteHash(appRoute);
     if (appRoute === 'history') {
-      renderHistory(lastDashboard, previous !== 'history');
+      if (dashboardHasLoadedHistory(lastDashboard)) {
+        renderHistory(lastDashboard, previous !== 'history');
+      } else {
+        renderHistory(null, true);
+      }
+      scheduleHistoryFetch();
       if (options && options.focus && historyScreen && typeof historyScreen.focus === 'function') {
         historyScreen.focus({ preventScroll: true });
       }
-    } else if (previous === 'history' && lastDashboard) {
+    } else if (previous === 'history') {
+      unloadHistoryRoute();
       window.requestAnimationFrame(function () {
         if (appRoute === 'mission' && lastDashboard && typeof window.__cmcRenderDashboard === 'function') {
           window.__cmcRenderDashboard(lastDashboard);
@@ -1187,10 +1246,10 @@
         + '</div>'
         + '</div>'
         + '<div class="cmc-session-meta">'
-        + '<span class="cmc-meta-pill">Last: ' + escapeHtml(activity.last) + '</span>'
-        + '<span class="cmc-meta-pill">Tool: ' + escapeHtml(activity.tool) + '</span>'
-        + '<span class="cmc-meta-pill">Age: ' + escapeHtml(activity.age) + '</span>'
-        + '<span class="cmc-meta-pill">Tokens in/out: ' + tokenLabel(inTok, outTok, inputPending) + '</span>'
+        + '<span class="cmc-meta-label">Last: ' + escapeHtml(activity.last) + '</span>'
+        + '<span class="cmc-meta-label">Tool: ' + escapeHtml(activity.tool) + '</span>'
+        + '<span class="cmc-meta-label">Age: ' + escapeHtml(activity.age) + '</span>'
+        + '<span class="cmc-meta-label">Tokens in/out: ' + tokenLabel(inTok, outTok, inputPending) + '</span>'
         + '</div>'
         + '</div>'
         + '<div class="cmc-actions">'
@@ -1232,7 +1291,6 @@
     var disabled = count <= 0;
     body.innerHTML = '<div class="cmc-quarter-line">' + escapeHtml(q.countLine) + '</div>'
       + '<div class="cmc-quarter-line">' + escapeHtml(q.line) + '</div>'
-      + (q.toolList ? '<div class="cmc-quarter-tools cmc-muted">' + escapeHtml(q.toolList) + '</div>' : '')
       + '<div class="cmc-actions cmc-quarter-actions">'
       + '<button class="cmc-button accent ' + (disabled ? 'disabled' : '') + '" type="button" aria-label="Open details for ' + escapeHtml(q.title || categoryLabel(q.category)) + ' sector" aria-haspopup="dialog" '
       + (disabled ? 'disabled aria-disabled="true"' : 'data-cmc-action="quarter-details"')
@@ -1455,7 +1513,6 @@
       q.count || 0,
       q.countLine || '',
       q.line || '',
-      q.toolList || '',
     ].join('::');
   }
 

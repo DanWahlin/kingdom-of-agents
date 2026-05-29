@@ -104,7 +104,7 @@
       cursor: pointer;
       font-size: 13px;
       line-height: 1;
-      transition: background 0.15s ease, border-color 0.15s ease;
+      transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
     }
     #topbar button:hover,
     .topbar-button:hover {
@@ -170,6 +170,7 @@
     .topbar-route {
       min-width: 36px;
       padding: 0;
+      color: rgba(232, 236, 255, 0.74);
     }
     #topbar button.topbar-route,
     #topbar button.topbar-route:hover {
@@ -182,24 +183,31 @@
     body.theme-light #topbar button.topbar-route:hover {
       background: #f1f5f9;
     }
+    body.theme-light .topbar-route {
+      color: #64748b;
+    }
     .topbar-route-label {
       font: inherit;
       letter-spacing: inherit;
       text-transform: none;
     }
-    .topbar-route.active,
-    .topbar-route[aria-current="page"] {
-      background: linear-gradient(180deg, rgba(97, 214, 255, 0.24), rgba(13, 97, 245, 0.18));
+    #topbar button.topbar-route.active,
+    #topbar button.topbar-route[aria-current="page"] {
+      background: linear-gradient(180deg, rgba(96, 255, 154, 0.24), rgba(13, 97, 245, 0.22));
       border-color: transparent;
-      color: #d8f7ff;
-      box-shadow: none;
+      color: #b8ffcf;
+      box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+        0 0 16px rgba(97, 214, 255, 0.12);
     }
-    body.theme-light .topbar-route.active,
-    body.theme-light .topbar-route[aria-current="page"] {
-      background: linear-gradient(180deg, #e8f2ff 0%, #dbeafe 100%);
+    body.theme-light #topbar button.topbar-route.active,
+    body.theme-light #topbar button.topbar-route[aria-current="page"] {
+      background: linear-gradient(180deg, #dcfce7 0%, #dbeafe 100%);
       border-color: transparent;
-      color: #174078;
-      box-shadow: none;
+      color: #166534;
+      box-shadow:
+        inset 0 0 0 1px rgba(30, 64, 175, 0.1),
+        0 6px 16px rgba(30, 64, 175, 0.12);
     }
     /* Panels-toggle button — collapse/expand side panels for a focused
        mission-only view. Sits left of the theme button. Uses inline SVG
@@ -1758,8 +1766,11 @@
       padding: 6px 8px;
     }
     .cmc-session-caret {
-      color: #93a4d8;
-      font-size: 10px;
+      color: #c7d2fe;
+      font-size: 18px;
+      font-weight: 800;
+      line-height: 1;
+      padding: 0 4px;
     }
     .cmc-session-menu {
       display: none;
@@ -1839,15 +1850,14 @@
         radial-gradient(circle at 18px 16px, rgba(96, 255, 154, 0.22), transparent 52px),
         linear-gradient(180deg, rgba(34, 156, 78, 0.24), rgba(16, 24, 51, 0.74));
       box-shadow:
-        inset 0 0 0 1px rgba(96, 255, 154, 0.12),
-        0 0 18px rgba(96, 255, 154, 0.08);
+        inset 0 0 0 1px rgba(96, 255, 154, 0.12);
     }
     body.theme-light .cmc-session-summary {
       background:
         radial-gradient(circle at 18px 16px, rgba(34, 197, 94, 0.16), transparent 52px),
         linear-gradient(180deg, #f1fbf6, #ffffff);
       border-color: #69c98e;
-      box-shadow: 0 10px 24px rgba(20, 83, 45, 0.12);
+      box-shadow: none;
     }
     .cmc-session-heading {
       display: grid;
@@ -1874,12 +1884,10 @@
       color: #93a4d8;
     }
     body.theme-light .cmc-session-subtitle { color: #52627a; }
-    .cmc-meta-pill {
-      border: 1px solid rgba(127, 151, 239, 0.36);
-      border-radius: 999px;
-      padding: 4px 7px;
+    .cmc-meta-label {
+      color: #cbd6ff;
+      font-weight: 600;
       white-space: nowrap;
-      background: rgba(2, 7, 19, 0.28);
     }
     .cmc-session-meta {
       display: flex;
@@ -1889,9 +1897,8 @@
       font-size: 10px;
       line-height: 1.25;
     }
-    body.theme-light .cmc-meta-pill {
-      background: #ffffff;
-      border-color: #cad5e4;
+    body.theme-light .cmc-meta-label {
+      color: #334155;
     }
     .cmc-provider-alert {
       margin: 0 0 8px;
@@ -1988,7 +1995,7 @@
       background: #fef3c7;
       color: #92400e;
     }
-    .cmc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 6px; }
+    .cmc-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; margin-bottom: 6px; }
     .cmc-button {
       border: 1px solid rgba(165, 177, 216, 0.7);
       background: #1a2448;
@@ -2126,7 +2133,6 @@
       background: linear-gradient(180deg, var(--cmc-scrollbar-thumb-hover-start) 0%, var(--cmc-scrollbar-thumb-hover-end) 100%);
     }
     .cmc-quarter-line { font-size: 12px; line-height: 1.55; margin: 0; }
-    .cmc-quarter-tools { font-size: 11px; line-height: 1.45; margin-top: 2px; }
     .cmc-quarter-actions {
       margin-top: auto;
       padding-top: 8px;

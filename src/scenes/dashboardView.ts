@@ -27,7 +27,6 @@ export interface QuarterViewInput {
   count: number;
   stats: {
     line: string;
-    toolList: string | null;
   };
 }
 
@@ -61,7 +60,6 @@ export function buildQuarterView(input: QuarterViewInput | null) {
     count: input.count,
     countLine: `${input.count} selected-session ${input.short.toLowerCase()} signals`,
     line: input.stats.line,
-    toolList: input.stats.toolList ?? '',
   };
 }
 

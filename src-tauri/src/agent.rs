@@ -295,6 +295,12 @@ pub struct RawToolCallDetails {
     pub raw_args: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_output: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub raw_args_truncated: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub raw_output_truncated: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub raw_output_scan_limited: bool,
 }
 
 #[derive(serde::Serialize, Default, Clone)]
@@ -401,7 +407,7 @@ pub trait AgentProvider: Send + Sync {
     /// Directories whose changes should trigger a re-scan. Empty means
     /// the provider cannot be watched (e.g. it polls a remote endpoint).
     fn state_roots(&self) -> Vec<PathBuf>;
-    fn scan(&self) -> ProviderScan;
+    fn scan(&self, include_history: bool) -> ProviderScan;
 }
 
 pub fn default_providers() -> Vec<Box<dyn AgentProvider>> {
@@ -449,6 +455,60 @@ const SCHEMA_FETCH_TIMEOUT_SECS: u64 = 2;
 static COPILOT_SCHEMA: OnceLock<(ProviderSchema, Vec<String>)> = OnceLock::new();
 static ACTIVITY_CACHE: OnceLock<RwLock<AgentActivity>> = OnceLock::new();
 static ACTIVITY_REFRESH_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static COPILOT_SESSION_SCAN_CACHE: OnceLock<
+    RwLock<HashMap<CopilotSessionCacheKey, CachedCopilotSessionScan>>,
+> = OnceLock::new();
+static COPILOT_TOKEN_PREFIX_CACHE: OnceLock<
+    RwLock<HashMap<CopilotTokenPrefixCacheKey, CachedTokenPrefix>>,
+> = OnceLock::new();
+const MAX_COPILOT_SESSION_SCAN_CACHE_ENTRIES: usize = 256;
+const MAX_COPILOT_TOKEN_PREFIX_CACHE_ENTRIES: usize = 256;
+const MAX_EVENT_TAIL_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_RAW_DETAIL_SCAN_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_RAW_DETAIL_VALUE_BYTES: usize = 512 * 1024;
+const TOKEN_PREFIX_HEAD_SIGNATURE_BYTES: usize = 4096;
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct FileFingerprint {
+    len: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct CopilotSessionCacheKey {
+    session_path: PathBuf,
+    events: FileFingerprint,
+    workspace: Option<FileFingerprint>,
+    schema_context: String,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct CopilotTokenPrefixCacheKey {
+    events_path: PathBuf,
+    schema_context: String,
+}
+
+#[derive(Clone)]
+struct CachedCopilotSessionScan {
+    summary: AgentSessionSummary,
+    tool_counts: BTreeMap<(String, String), usize>,
+    recent_events: Vec<AgentEventSummary>,
+    schema_stats: SessionSchemaStats,
+}
+
+#[derive(Clone, Copy, Default)]
+struct TokenTotals {
+    input_tokens: u64,
+    output_tokens: u64,
+}
+
+#[derive(Clone)]
+struct CachedTokenPrefix {
+    processed_len: u64,
+    totals: TokenTotals,
+    head_signature: Vec<u8>,
+}
 
 #[derive(serde::Deserialize, Clone)]
 struct ProviderSchema {
@@ -512,6 +572,10 @@ struct EventsSchema {
     hook_name_paths: Vec<String>,
     #[serde(default)]
     hook_invocation_id_paths: Vec<String>,
+    #[serde(default)]
+    hook_input_paths: Vec<String>,
+    #[serde(default)]
+    hook_output_paths: Vec<String>,
 }
 
 #[derive(serde::Deserialize, Clone, Default)]
@@ -955,6 +1019,12 @@ fn validate_provider_schema(schema: &ProviderSchema) -> Result<(), String> {
         &["hookInvocationId", "hook_invocation_id"],
         "hook invocation id",
     )?;
+    validate_path_suffixes(&schema.events.hook_input_paths, &["input"], "hook input")?;
+    validate_path_suffixes(
+        &schema.events.hook_output_paths,
+        &["output", "result", "error"],
+        "hook output",
+    )?;
     if !schema.hooks.hook_types_path.is_empty()
         && !is_safe_surface_path(&schema.hooks.hook_types_path)
     {
@@ -1262,15 +1332,34 @@ fn activity_refresh_lock() -> &'static Mutex<()> {
     ACTIVITY_REFRESH_LOCK.get_or_init(|| Mutex::new(()))
 }
 
-fn scan_agent_activity() -> AgentActivity {
+fn scan_agent_activity(include_history: bool) -> AgentActivity {
     let providers = default_providers();
-    let scans: Vec<ProviderScan> = providers.iter().map(|p| p.scan()).collect();
-    merge_scans(scans)
+    let scans: Vec<ProviderScan> = providers.iter().map(|p| p.scan(include_history)).collect();
+    merge_scans(scans, include_history)
 }
 
-fn cached_agent_activity_snapshot() -> Option<AgentActivity> {
+fn without_history(mut activity: AgentActivity) -> AgentActivity {
+    activity.history = AgentHistorySummary::default();
+    activity
+}
+
+fn activity_includes_history(activity: &AgentActivity) -> bool {
+    activity.history.generated_at_ms > 0
+}
+
+fn cached_agent_activity_snapshot(include_history: bool) -> Option<AgentActivity> {
     match activity_cache().read() {
-        Ok(cached) if cached.generated_at_ms > 0 => Some(cached.clone()),
+        Ok(cached)
+            if cached.generated_at_ms > 0
+                && (!include_history || activity_includes_history(&cached)) =>
+        {
+            let activity = cached.clone();
+            Some(if include_history {
+                activity
+            } else {
+                without_history(activity)
+            })
+        }
         Ok(_) => None,
         Err(err) => {
             log::warn!("Agent activity cache lock poisoned during read: {}", err);
@@ -1279,8 +1368,8 @@ fn cached_agent_activity_snapshot() -> Option<AgentActivity> {
     }
 }
 
-fn scan_and_store_agent_activity() -> AgentActivity {
-    let activity = scan_agent_activity();
+fn scan_and_store_agent_activity(include_history: bool) -> AgentActivity {
+    let activity = scan_agent_activity(include_history);
     match activity_cache().write() {
         Ok(mut cached) => {
             *cached = activity.clone();
@@ -1289,27 +1378,45 @@ fn scan_and_store_agent_activity() -> AgentActivity {
             log::warn!("Agent activity cache lock poisoned during refresh: {}", err);
         }
     }
-    activity
+    if include_history {
+        activity
+    } else {
+        without_history(activity)
+    }
 }
 
 pub fn refresh_agent_activity_cache() -> AgentActivity {
     match activity_refresh_lock().lock() {
-        Ok(_guard) => scan_and_store_agent_activity(),
+        Ok(_guard) => scan_and_store_agent_activity(false),
         Err(err) => {
             log::warn!("Agent activity refresh lock poisoned: {}", err);
-            cached_agent_activity_snapshot().unwrap_or_else(scan_agent_activity)
+            cached_agent_activity_snapshot(false).unwrap_or_else(|| scan_agent_activity(false))
         }
     }
 }
 
 pub fn collect_agent_activity() -> AgentActivity {
+    collect_agent_activity_for_route(false)
+}
+
+pub fn collect_agent_activity_with_history() -> AgentActivity {
+    collect_agent_activity_for_route(true)
+}
+
+fn collect_agent_activity_for_route(include_history: bool) -> AgentActivity {
     let now = unix_ms(SystemTime::now());
     match activity_cache().read() {
         Ok(cached)
             if cached.generated_at_ms > 0
-                && now.saturating_sub(cached.generated_at_ms) < ACTIVITY_CACHE_MAX_AGE_MS =>
+                && now.saturating_sub(cached.generated_at_ms) < ACTIVITY_CACHE_MAX_AGE_MS
+                && (!include_history || activity_includes_history(&cached)) =>
         {
-            return cached.clone();
+            let activity = cached.clone();
+            return if include_history {
+                activity
+            } else {
+                without_history(activity)
+            };
         }
         Ok(_) => {}
         Err(err) => {
@@ -1317,12 +1424,17 @@ pub fn collect_agent_activity() -> AgentActivity {
         }
     }
     match activity_refresh_lock().try_lock() {
-        Ok(_guard) => scan_and_store_agent_activity(),
-        Err(_) => cached_agent_activity_snapshot().unwrap_or_default(),
+        Ok(_guard) => scan_and_store_agent_activity(include_history),
+        Err(_) => cached_agent_activity_snapshot(include_history).unwrap_or_default(),
     }
 }
 
-fn merge_scans(scans: Vec<ProviderScan>) -> AgentActivity {
+fn truncate_recent_events(events: &mut Vec<AgentEventSummary>, max: usize) {
+    events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+    events.truncate(max);
+}
+
+fn merge_scans(scans: Vec<ProviderScan>, include_history: bool) -> AgentActivity {
     let mut activity = AgentActivity {
         available: scans.iter().any(|s| s.available),
         source: if scans.len() == 1 {
@@ -1416,12 +1528,14 @@ fn merge_scans(scans: Vec<ProviderScan>) -> AgentActivity {
     activity.tools = survivors;
 
     all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-    activity.history = build_history_summary(
-        &all_sessions,
-        &all_events,
-        &activity.tools,
-        activity.generated_at_ms,
-    );
+    if include_history {
+        activity.history = build_history_summary(
+            &all_sessions,
+            &all_events,
+            &activity.tools,
+            activity.generated_at_ms,
+        );
+    }
     activity.sessions = all_sessions.into_iter().take(MAX_SESSIONS).collect();
     all_events.truncate(MAX_RECENT_EVENTS);
     activity.recent_events = all_events;
@@ -2014,12 +2128,12 @@ impl AgentProvider for CopilotProvider {
             .map(|root| root.path)
             .collect()
     }
-    fn scan(&self) -> ProviderScan {
-        scan_copilot()
+    fn scan(&self, include_history: bool) -> ProviderScan {
+        scan_copilot(include_history)
     }
 }
 
-fn scan_copilot() -> ProviderScan {
+fn scan_copilot(include_history: bool) -> ProviderScan {
     let provider = "copilot";
     let (schema, schema_alerts) = load_copilot_schema();
     let executable_available = is_copilot_available();
@@ -2126,11 +2240,20 @@ fn scan_copilot() -> ProviderScan {
     // Load once per scan; reused for every tool execution event below.
     let mcp_allowlist = load_mcp_tool_allowlist(&schema);
     let configured_hook_types = load_configured_hook_types(&schema);
+    let session_cache_context = copilot_session_cache_context(
+        &schema.schema_version,
+        &mcp_allowlist,
+        &configured_hook_types,
+    );
+    let token_prefix_cache_context = copilot_token_prefix_cache_context(&schema);
+    let mut active_session_paths = HashSet::new();
+    let mut active_events_paths = HashSet::new();
     let mut schema_drift = SchemaDriftAccumulator::new(provider, &schema.schema_version);
 
     let now = SystemTime::now();
 
     for (session_path, modified) in session_dirs {
+        active_session_paths.insert(session_path.clone());
         let session_id = session_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -2138,6 +2261,7 @@ fn scan_copilot() -> ProviderScan {
             .to_string();
         let workspace_path = first_existing_child(&session_path, &schema.session.workspace_files);
         let events_path = first_existing_child(&session_path, &schema.session.events_files);
+        active_events_paths.insert(events_path.clone());
         let workspace = parse_workspace(&workspace_path, &schema);
         let session_name = sanitize_session_title(workspace.get("name"));
         let age_seconds = now
@@ -2170,17 +2294,63 @@ fn scan_copilot() -> ProviderScan {
         summary.title =
             session_title_from_workspace(&workspace, &summary.repository, &summary.branch);
 
-        let session_schema_stats = summarize_events(
-            provider,
+        let cache_key = copilot_session_cache_key(
+            &session_path,
             &events_path,
-            &session_id,
-            &mut summary,
-            &mut scan.tool_counts,
-            &mut scan.recent_events,
-            &mcp_allowlist,
-            &configured_hook_types,
-            &schema,
+            &workspace_path,
+            &session_cache_context,
         );
+
+        let mut session_tool_counts = BTreeMap::new();
+        let mut session_recent_events = Vec::new();
+        let session_schema_stats = if let Some(key) = cache_key.as_ref() {
+            if let Some(cached) = cached_copilot_session_scan(key, &summary) {
+                summary = cached.summary;
+                session_tool_counts = cached.tool_counts;
+                session_recent_events = cached.recent_events;
+                cached.schema_stats
+            } else {
+                let stats = summarize_events(
+                    provider,
+                    &events_path,
+                    &session_id,
+                    &mut summary,
+                    &mut session_tool_counts,
+                    &mut session_recent_events,
+                    &mcp_allowlist,
+                    &configured_hook_types,
+                    &schema,
+                    &token_prefix_cache_context,
+                );
+                store_copilot_session_scan(
+                    key.clone(),
+                    CachedCopilotSessionScan {
+                        summary: summary.clone(),
+                        tool_counts: session_tool_counts.clone(),
+                        recent_events: session_recent_events.clone(),
+                        schema_stats: stats.clone(),
+                    },
+                );
+                stats
+            }
+        } else {
+            summarize_events(
+                provider,
+                &events_path,
+                &session_id,
+                &mut summary,
+                &mut session_tool_counts,
+                &mut session_recent_events,
+                &mcp_allowlist,
+                &configured_hook_types,
+                &schema,
+                &token_prefix_cache_context,
+            )
+        };
+        for ((name, category), count) in session_tool_counts {
+            *scan.tool_counts.entry((name, category)).or_insert(0) += count;
+        }
+        scan.recent_events.extend(session_recent_events);
         schema_drift.record_session(&summary, &session_schema_stats);
 
         // Active sessions report "working" or "thinking" by activity
@@ -2209,16 +2379,21 @@ fn scan_copilot() -> ProviderScan {
         scan.total_input_tokens += summary.input_tokens;
         scan.total_turns += summary.turn_count;
         scan.sessions.push(summary);
+        if !include_history && scan.recent_events.len() > MAX_RECENT_EVENTS {
+            truncate_recent_events(&mut scan.recent_events, MAX_RECENT_EVENTS);
+        }
     }
     if let Some(report) = schema_drift.into_report() {
         scan.alerts.push(report.summary.clone());
         scan.schema_drift.push(report);
     }
+    sweep_copilot_session_scan_cache(&active_session_paths);
+    sweep_copilot_token_prefix_cache(&active_events_paths);
 
     scan
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct SessionSchemaStats {
     total_events: usize,
     recognized_events: usize,
@@ -2243,6 +2418,195 @@ impl SessionSchemaStats {
                 .entry(event_type.to_string())
                 .or_insert(0) += 1;
         }
+    }
+}
+
+fn file_fingerprint(path: &Path) -> Option<FileFingerprint> {
+    let metadata = fs::metadata(path).ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+    let modified = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some(FileFingerprint {
+        len: metadata.len(),
+        modified_secs: modified.as_secs(),
+        modified_nanos: modified.subsec_nanos(),
+    })
+}
+
+fn copilot_session_cache(
+) -> &'static RwLock<HashMap<CopilotSessionCacheKey, CachedCopilotSessionScan>> {
+    COPILOT_SESSION_SCAN_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn copilot_session_cache_context(
+    schema_version: &str,
+    mcp_allowlist: &HashSet<String>,
+    configured_hook_types: &HashSet<String>,
+) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(schema_version.as_bytes());
+    hasher.update([0]);
+
+    let mut allowed_tools = mcp_allowlist.iter().collect::<Vec<_>>();
+    allowed_tools.sort();
+    for tool in allowed_tools {
+        hasher.update(tool.as_bytes());
+        hasher.update([0]);
+    }
+
+    let mut hook_types = configured_hook_types.iter().collect::<Vec<_>>();
+    hook_types.sort();
+    for hook_type in hook_types {
+        hasher.update(hook_type.as_bytes());
+        hasher.update([0]);
+    }
+
+    format!("{:x}", hasher.finalize())
+}
+
+fn copilot_token_prefix_cache_context(schema: &ProviderSchema) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(schema.schema_version.as_bytes());
+    hasher.update([0]);
+    for token in &schema.token_events {
+        hasher.update(token.event_type.as_bytes());
+        hasher.update([0]);
+        hasher.update(token.mode.as_bytes());
+        hasher.update([0]);
+        for path in &token.input_components {
+            hasher.update(path.as_bytes());
+            hasher.update([0]);
+        }
+        hasher.update([0xff]);
+        for path in &token.output_components {
+            hasher.update(path.as_bytes());
+            hasher.update([0]);
+        }
+        hasher.update([0xff]);
+        if let Some(model_metrics) = &token.model_metrics {
+            hasher.update(model_metrics.metrics_path.as_bytes());
+            hasher.update([0]);
+            hasher.update(model_metrics.input_path.as_bytes());
+            hasher.update([0]);
+            hasher.update(model_metrics.cache_read_path.as_bytes());
+            hasher.update([0]);
+            hasher.update(model_metrics.output_path.as_bytes());
+            hasher.update([0]);
+        }
+        hasher.update([0xff]);
+    }
+    for path in &schema.events.event_type_paths {
+        hasher.update(path.as_bytes());
+        hasher.update([0]);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+fn copilot_session_cache_key(
+    session_path: &Path,
+    events_path: &Path,
+    workspace_path: &Path,
+    schema_context: &str,
+) -> Option<CopilotSessionCacheKey> {
+    Some(CopilotSessionCacheKey {
+        session_path: session_path.to_path_buf(),
+        events: file_fingerprint(events_path)?,
+        workspace: file_fingerprint(workspace_path),
+        schema_context: schema_context.to_string(),
+    })
+}
+
+fn restore_dynamic_session_fields(
+    summary: &mut AgentSessionSummary,
+    current: &AgentSessionSummary,
+) {
+    summary.provider.clone_from(&current.provider);
+    summary.id.clone_from(&current.id);
+    summary.session_name.clone_from(&current.session_name);
+    summary.repository.clone_from(&current.repository);
+    summary.branch.clone_from(&current.branch);
+    summary.updated_at.clone_from(&current.updated_at);
+    summary.is_active = current.is_active;
+    summary.stale_seconds = current.stale_seconds;
+    summary.git_root.clone_from(&current.git_root);
+    summary.title.clone_from(&current.title);
+}
+
+fn cached_copilot_session_scan(
+    key: &CopilotSessionCacheKey,
+    current_summary: &AgentSessionSummary,
+) -> Option<CachedCopilotSessionScan> {
+    let mut cached = copilot_session_cache().read().ok()?.get(key)?.clone();
+    restore_dynamic_session_fields(&mut cached.summary, current_summary);
+    Some(cached)
+}
+
+fn store_copilot_session_scan(key: CopilotSessionCacheKey, scan: CachedCopilotSessionScan) {
+    if let Ok(mut cache) = copilot_session_cache().write() {
+        let session_path = key.session_path.clone();
+        cache.retain(|cached_key, _| cached_key.session_path != session_path || cached_key == &key);
+        cache.insert(key, scan);
+        if cache.len() > MAX_COPILOT_SESSION_SCAN_CACHE_ENTRIES {
+            let overflow = cache.len() - MAX_COPILOT_SESSION_SCAN_CACHE_ENTRIES;
+            let remove_keys = cache.keys().take(overflow).cloned().collect::<Vec<_>>();
+            for key in remove_keys {
+                cache.remove(&key);
+            }
+        }
+    }
+}
+
+fn sweep_copilot_session_scan_cache(active_session_paths: &HashSet<PathBuf>) {
+    if let Ok(mut cache) = copilot_session_cache().write() {
+        cache.retain(|key, _| active_session_paths.contains(&key.session_path));
+    }
+}
+
+fn copilot_token_prefix_cache(
+) -> &'static RwLock<HashMap<CopilotTokenPrefixCacheKey, CachedTokenPrefix>> {
+    COPILOT_TOKEN_PREFIX_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
+}
+
+fn copilot_token_prefix_cache_key(
+    events_path: &Path,
+    schema_context: &str,
+) -> CopilotTokenPrefixCacheKey {
+    CopilotTokenPrefixCacheKey {
+        events_path: events_path.to_path_buf(),
+        schema_context: schema_context.to_string(),
+    }
+}
+
+fn cached_token_prefix(
+    key: &CopilotTokenPrefixCacheKey,
+    target_len: u64,
+    head_signature: &[u8],
+) -> Option<CachedTokenPrefix> {
+    let cached = copilot_token_prefix_cache().read().ok()?.get(key)?.clone();
+    if cached.processed_len <= target_len && cached.head_signature == head_signature {
+        Some(cached)
+    } else {
+        None
+    }
+}
+
+fn store_token_prefix(key: CopilotTokenPrefixCacheKey, prefix: CachedTokenPrefix) {
+    if let Ok(mut cache) = copilot_token_prefix_cache().write() {
+        cache.insert(key, prefix);
+        if cache.len() > MAX_COPILOT_TOKEN_PREFIX_CACHE_ENTRIES {
+            let overflow = cache.len() - MAX_COPILOT_TOKEN_PREFIX_CACHE_ENTRIES;
+            let remove_keys = cache.keys().take(overflow).cloned().collect::<Vec<_>>();
+            for key in remove_keys {
+                cache.remove(&key);
+            }
+        }
+    }
+}
+
+fn sweep_copilot_token_prefix_cache(active_events_paths: &HashSet<PathBuf>) {
+    if let Ok(mut cache) = copilot_token_prefix_cache().write() {
+        cache.retain(|key, _| active_events_paths.contains(&key.events_path));
     }
 }
 
@@ -2654,6 +3018,7 @@ fn summarize_events(
     mcp_allowlist: &HashSet<String>,
     configured_hook_types: &HashSet<String>,
     schema: &ProviderSchema,
+    token_prefix_cache_context: &str,
 ) -> SessionSchemaStats {
     let mut schema_stats = SessionSchemaStats::default();
     let Ok(mut file) = fs::File::open(path) else {
@@ -2661,14 +3026,12 @@ fn summarize_events(
     };
 
     // Tail-window limit. The full-event scan (recent tools, errors,
-    // last_tool, recent_events list) only reads the last MAX_READ_BYTES
+    // last_tool, recent_events list) only reads the last MAX_EVENT_TAIL_BYTES
     // of the file: that gives ~5-15 minutes of busy-session history and
     // parses in a few ms, even for a 100 MB+ events.jsonl. Bumped from
     // 512 KiB → 8 MiB because 512 KiB only captured the most recent
     // ~30-50 tool calls, which made low-volume categories like Intent
     // (`report_intent`) invisible whenever bash bursts dominated.
-    const MAX_READ_BYTES: u64 = 8 * 1024 * 1024;
-
     let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
 
     // If the file is larger than the tail window, pre-scan the SKIPPED
@@ -2682,12 +3045,16 @@ fn summarize_events(
     // substring-filter lines before JSON-parsing, so only the ~1 in
     // 4 MB of lines that actually contain a token event get parsed.
     let mut read_offset = 0;
-    if file_len > MAX_READ_BYTES {
-        if let Ok(head_file) = fs::File::open(path) {
-            let head_reader = BufReader::new(head_file.take(file_len - MAX_READ_BYTES));
-            fold_skipped_token_events(head_reader, summary, schema);
-        }
-        read_offset = file_len - MAX_READ_BYTES;
+    if file_len > MAX_EVENT_TAIL_BYTES {
+        let skipped_len = file_len - MAX_EVENT_TAIL_BYTES;
+        fold_skipped_token_events_from_path(
+            path,
+            skipped_len,
+            summary,
+            schema,
+            token_prefix_cache_context,
+        );
+        read_offset = skipped_len;
         let _ = file.seek(SeekFrom::Start(read_offset));
     }
 
@@ -3031,7 +3398,7 @@ fn summarize_events(
             }
             // Note: we deliberately do NOT count "orphan" complete events
             // (no matching start in this scan). Because we only read the
-            // last MAX_READ_BYTES of events.jsonl, the tail often begins
+            // last MAX_EVENT_TAIL_BYTES of events.jsonl, the tail often begins
             // mid-pair — the first few completes routinely have no start
             // in the window. Counting those would re-flag every long-
             // running session as needs-attention purely from tail
@@ -3236,58 +3603,136 @@ fn raw_tool_call_details_from_events_path(
     let value = serde_json::from_str::<serde_json::Value>(&line)
         .map_err(|_| "Tool event reference no longer points to a readable event".to_string())?;
     let event_type = string_from_paths(&value, &schema.events.event_type_paths).unwrap_or_default();
-    if event_type != schema.events.tool_start {
-        return Err("Raw details are only available for tool calls".to_string());
-    }
-
-    let raw_args =
-        value_from_paths(&value, &schema.events.arguments_paths).map(raw_value_to_string);
-    let raw_call_id = raw_tool_call_id(&value, schema);
-    let raw_output = find_raw_tool_output(&mut reader, schema, raw_call_id.as_deref());
+    let (raw_args, raw_args_truncated, raw_output) = if event_type == schema.events.tool_start {
+        let (raw_args, raw_args_truncated) =
+            value_from_paths(&value, &schema.events.arguments_paths)
+                .map(|value| raw_value_to_string(value, MAX_RAW_DETAIL_VALUE_BYTES))
+                .unwrap_or_default();
+        let raw_call_id = raw_tool_call_id(&value, schema);
+        let raw_output = find_raw_event_output(
+            &mut reader,
+            schema,
+            &schema.events.tool_complete,
+            raw_call_id.as_deref(),
+            &schema.events.output_paths,
+            raw_tool_call_id,
+        );
+        (raw_args, raw_args_truncated, raw_output)
+    } else if event_type == schema.events.hook_start {
+        let (raw_args, raw_args_truncated) =
+            value_from_paths(&value, &schema.events.hook_input_paths)
+                .map(|value| raw_value_to_string(value, MAX_RAW_DETAIL_VALUE_BYTES))
+                .unwrap_or_default();
+        let raw_hook_id = raw_hook_invocation_id(&value, schema);
+        let raw_output = find_raw_event_output(
+            &mut reader,
+            schema,
+            &schema.events.hook_complete,
+            raw_hook_id.as_deref(),
+            &schema.events.hook_output_paths,
+            raw_hook_invocation_id,
+        );
+        (raw_args, raw_args_truncated, raw_output)
+    } else {
+        return Err("Raw details are only available for tool or hook calls".to_string());
+    };
     Ok(RawToolCallDetails {
         raw_args,
-        raw_output,
+        raw_output: raw_output.value,
+        raw_args_truncated,
+        raw_output_truncated: raw_output.truncated,
+        raw_output_scan_limited: raw_output.scan_limited,
     })
 }
 
-fn find_raw_tool_output<R: BufRead>(
+#[derive(Default)]
+struct RawOutputSearch {
+    value: Option<String>,
+    truncated: bool,
+    scan_limited: bool,
+}
+
+fn find_raw_event_output<R: BufRead, F>(
     reader: &mut R,
     schema: &ProviderSchema,
+    complete_event_type: &str,
     raw_call_id: Option<&str>,
-) -> Option<String> {
-    let raw_call_id = raw_call_id?;
-    if schema.events.output_paths.is_empty() {
-        return None;
+    output_paths: &[String],
+    event_id: F,
+) -> RawOutputSearch
+where
+    F: Fn(&serde_json::Value, &ProviderSchema) -> Option<String>,
+{
+    let Some(raw_call_id) = raw_call_id else {
+        return RawOutputSearch::default();
+    };
+    if output_paths.is_empty() || complete_event_type.is_empty() {
+        return RawOutputSearch::default();
     }
     let mut line = String::new();
+    let mut scanned_bytes = 0u64;
     loop {
         line.clear();
-        let bytes_read = reader.read_line(&mut line).ok()?;
+        let Ok(bytes_read) = reader.read_line(&mut line) else {
+            return RawOutputSearch::default();
+        };
         if bytes_read == 0 {
-            return None;
+            return RawOutputSearch::default();
+        }
+        scanned_bytes = scanned_bytes.saturating_add(bytes_read as u64);
+        if scanned_bytes > MAX_RAW_DETAIL_SCAN_BYTES {
+            return RawOutputSearch {
+                scan_limited: true,
+                ..Default::default()
+            };
         }
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
         let event_type =
             string_from_paths(&value, &schema.events.event_type_paths).unwrap_or_default();
-        if event_type != schema.events.tool_complete {
+        if event_type != complete_event_type {
             continue;
         }
-        if raw_tool_call_id(&value, schema).as_deref() == Some(raw_call_id) {
-            return value_from_paths(&value, &schema.events.output_paths).map(raw_value_to_string);
+        if event_id(&value, schema).as_deref() == Some(raw_call_id) {
+            let (value, truncated) = value_from_paths(&value, output_paths)
+                .map(|value| raw_value_to_string(value, MAX_RAW_DETAIL_VALUE_BYTES))
+                .unwrap_or_default();
+            return RawOutputSearch {
+                value,
+                truncated,
+                scan_limited: false,
+            };
         }
     }
 }
 
-fn raw_value_to_string(value: &serde_json::Value) -> String {
-    if let Some(value) = value.as_str() {
+fn raw_value_to_string(value: &serde_json::Value, max_bytes: usize) -> (Option<String>, bool) {
+    let rendered = if let Some(value) = value.as_str() {
         value.to_string()
     } else {
         serde_json::to_string_pretty(value)
             .or_else(|_| serde_json::to_string(value))
             .unwrap_or_default()
+    };
+    let (rendered, truncated) = truncate_utf8(rendered, max_bytes);
+    (Some(rendered), truncated)
+}
+
+fn truncate_utf8(mut value: String, max_bytes: usize) -> (String, bool) {
+    if value.len() <= max_bytes {
+        return (value, false);
     }
+    let mut boundary = max_bytes;
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+    (value, true)
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 fn is_safe_public_ref(value: &str) -> bool {
@@ -3464,16 +3909,102 @@ fn apply_token_event(
 /// cost is essentially free for the 99%+ of events that aren't token
 /// events. On a 163 MB file with 42 compactions this completes in
 /// well under a second.
-fn fold_skipped_token_events<R: BufRead>(
-    reader: R,
+fn fold_skipped_token_events_from_path(
+    path: &Path,
+    target_len: u64,
     summary: &mut AgentSessionSummary,
     schema: &ProviderSchema,
+    cache_context: &str,
 ) {
-    for line in reader.lines().map_while(Result::ok) {
+    if target_len == 0 {
+        return;
+    }
+
+    let Ok(mut file) = fs::File::open(path) else {
+        return;
+    };
+    let head_signature = file_head_signature(&mut file);
+    let key = copilot_token_prefix_cache_key(path, cache_context);
+    let mut start_offset = 0;
+    if let Some(cached) = cached_token_prefix(&key, target_len, &head_signature) {
+        apply_token_totals(summary, cached.totals);
+        start_offset = cached.processed_len;
+    }
+    if start_offset >= target_len {
+        return;
+    }
+
+    if file.seek(SeekFrom::Start(start_offset)).is_err() {
+        return;
+    }
+
+    let reader = BufReader::new(file.take(target_len - start_offset));
+    let processed_delta = fold_skipped_token_events(reader, summary, schema);
+    let processed_len = start_offset.saturating_add(processed_delta);
+    store_token_prefix(
+        key,
+        CachedTokenPrefix {
+            processed_len,
+            totals: token_totals(summary),
+            head_signature,
+        },
+    );
+}
+
+fn file_head_signature(file: &mut fs::File) -> Vec<u8> {
+    let mut signature = vec![0; TOKEN_PREFIX_HEAD_SIGNATURE_BYTES];
+    let read_len = match file.read(&mut signature) {
+        Ok(len) => len,
+        Err(_) => 0,
+    };
+    signature.truncate(read_len);
+    signature
+}
+
+fn token_totals(summary: &AgentSessionSummary) -> TokenTotals {
+    TokenTotals {
+        input_tokens: summary.input_tokens,
+        output_tokens: summary.output_tokens,
+    }
+}
+
+fn apply_token_totals(summary: &mut AgentSessionSummary, totals: TokenTotals) {
+    summary.input_tokens = totals.input_tokens;
+    summary.output_tokens = totals.output_tokens;
+}
+
+fn fold_skipped_token_events<R: BufRead>(
+    mut reader: R,
+    summary: &mut AgentSessionSummary,
+    schema: &ProviderSchema,
+) -> u64 {
+    let token_needles = schema
+        .token_events
+        .iter()
+        .map(|token| format!("\"{}\"", token.event_type))
+        .collect::<Vec<_>>();
+    let mut processed_len = 0u64;
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let Ok(bytes_read) = reader.read_until(b'\n', &mut line) else {
+            break;
+        };
+        if bytes_read == 0 {
+            break;
+        }
+        if !line.ends_with(b"\n") {
+            break;
+        }
+        processed_len = processed_len.saturating_add(bytes_read as u64);
+        let Ok(line) = std::str::from_utf8(&line) else {
+            continue;
+        };
         if !schema
             .token_events
             .iter()
-            .any(|token| line.contains(&format!("\"{}\"", token.event_type)))
+            .zip(token_needles.iter())
+            .any(|(_, needle)| line.contains(needle))
         {
             continue;
         }
@@ -3491,6 +4022,7 @@ fn fold_skipped_token_events<R: BufRead>(
             apply_token_event(&value, event_type, summary, schema);
         }
     }
+    processed_len
 }
 
 fn push_session_tool_call(buf: &mut Vec<SessionToolCall>, call: SessionToolCall) {
@@ -3978,7 +4510,7 @@ mod tests {
         assert_eq!(published, BUNDLED_COPILOT_SCHEMA);
         assert_eq!(
             sha256_hex(published),
-            "7ee6f870a9ea31656b23fd518902faf772d53ce2fdbce3320c2282dccc0bf667"
+            "3b559847ce1751fa8a84846d680c5e92cc5e2a14b340decc4b5ce04ca29746ce"
         );
     }
 
@@ -4150,6 +4682,7 @@ mod tests {
             &HashSet::new(),
             &HashSet::new(),
             &schema,
+            "test",
         );
         let rendered = serde_json::to_string(&summary).expect("serialize summary");
 
@@ -4206,6 +4739,7 @@ mod tests {
             &HashSet::new(),
             &configured_hook_types,
             &schema,
+            "test",
         );
         let rendered = serde_json::to_string(&summary).expect("serialize summary");
 
@@ -4229,6 +4763,11 @@ mod tests {
             .any(|event| event.kind == "hook.end" && event.category == "alert" && !event.success));
         assert!(!rendered.contains("SECRET"));
         assert!(!rendered.contains("/Users/dan/private"));
+
+        let raw = raw_tool_call_details_from_events_path(&path, &schema, &hook.event_ref)
+            .expect("raw hook details");
+        assert!(raw.raw_args.unwrap().contains("SECRET_PROMPT"));
+        assert_eq!(raw.raw_output.as_deref(), Some("SECRET_OUTPUT"));
 
         let _ = std::fs::remove_file(&path);
     }
@@ -4271,7 +4810,7 @@ mod tests {
 
     #[test]
     fn unavailable_merge_alert_reports_activity_source_not_cli_path() {
-        let activity = merge_scans(vec![ProviderScan::unavailable("test")]);
+        let activity = merge_scans(vec![ProviderScan::unavailable("test")], false);
 
         assert!(activity
             .alerts
@@ -4544,6 +5083,51 @@ mod tests {
         }
     }
 
+    #[test]
+    fn merge_only_builds_history_when_requested() {
+        let mut session = history_session("abc12345");
+        session.event_count = 1;
+        session.tool_count = 1;
+        let mut scan = scan_with_tools(&[("bash", "terminal", 1)]);
+        scan.sessions.push(session);
+        scan.recent_events.push(history_event(
+            "abc12345",
+            "2026-05-28T12:00:00Z",
+            "tool.execution_complete",
+            "bash",
+            "terminal",
+            true,
+        ));
+        scan.total_events = 1;
+        scan.total_tool_calls = 1;
+
+        let lightweight = merge_scans(vec![scan], false);
+        assert_eq!(lightweight.history.generated_at_ms, 0);
+        assert_eq!(lightweight.history.event_count, 0);
+        assert_eq!(lightweight.recent_events.len(), 1);
+
+        let mut scan = scan_with_tools(&[("bash", "terminal", 1)]);
+        let mut session = history_session("abc12345");
+        session.event_count = 1;
+        session.tool_count = 1;
+        scan.sessions.push(session);
+        scan.recent_events.push(history_event(
+            "abc12345",
+            "2026-05-28T12:00:00Z",
+            "tool.execution_complete",
+            "bash",
+            "terminal",
+            true,
+        ));
+        scan.total_events = 1;
+        scan.total_tool_calls = 1;
+
+        let with_history = merge_scans(vec![scan], true);
+        assert!(with_history.history.generated_at_ms > 0);
+        assert_eq!(with_history.history.event_count, 1);
+        assert_eq!(with_history.recent_events.len(), 1);
+    }
+
     /// Regression: chatty categories (bash/edit/view) used to take all
     /// MAX_TOOLS slots, dropping low-count MCP/web/agents entries from
     /// the renderer's `tools` array entirely. The two-pass truncation
@@ -4571,7 +5155,7 @@ mod tests {
             ("github-mcp-server-list", "mcp", 2),
         ]);
 
-        let activity = merge_scans(vec![scan]);
+        let activity = merge_scans(vec![scan], false);
         let mcp_tools: Vec<&AgentToolMetric> = activity
             .tools
             .iter()
@@ -4613,7 +5197,7 @@ mod tests {
         entries.push(("web-fetch", "signal", 2));
 
         let scan = scan_with_tools(&entries);
-        let activity = merge_scans(vec![scan]);
+        let activity = merge_scans(vec![scan], false);
         let terminal_count = activity
             .tools
             .iter()
@@ -4644,7 +5228,7 @@ mod tests {
             ("f", "terminal", 10),
             ("g", "terminal", 5),
         ]);
-        let activity = merge_scans(vec![scan]);
+        let activity = merge_scans(vec![scan], false);
         // The category cap floor is `1 * 5 = 5`, so MAX_TOOLS (10) wins
         // → survivors should saturate at 7 (all the tools we provided).
         assert_eq!(activity.tools.len(), 7);
@@ -4659,7 +5243,7 @@ mod tests {
             ("common", "terminal", 100),
             ("medium", "library", 50),
         ]);
-        let activity = merge_scans(vec![scan]);
+        let activity = merge_scans(vec![scan], false);
         let counts: Vec<usize> = activity.tools.iter().map(|t| t.count).collect();
         let mut sorted = counts.clone();
         sorted.sort_by(|a, b| b.cmp(a));
@@ -4892,6 +5476,7 @@ mod tests {
             &allowlist,
             &HashSet::new(),
             &schema,
+            "test",
         );
 
         assert_eq!(summary.recent_tool_calls.len(), 2);
@@ -4949,6 +5534,120 @@ mod tests {
     }
 
     #[test]
+    fn raw_tool_call_details_truncate_large_values() {
+        use std::io::Write;
+
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "cmc_test_raw_truncate_{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let huge_args = "A".repeat(MAX_RAW_DETAIL_VALUE_BYTES + 128);
+        let huge_output = "B".repeat(MAX_RAW_DETAIL_VALUE_BYTES + 128);
+        {
+            let mut f = std::fs::File::create(&path).expect("create temp jsonl");
+            let start = serde_json::json!({
+                "type": "tool.execution_start",
+                "timestamp": "2026-01-01T00:00:03.000Z",
+                "data": {
+                    "toolName": "bash",
+                    "toolCallId": "call-huge",
+                    "arguments": { "payload": huge_args }
+                }
+            });
+            let complete = serde_json::json!({
+                "type": "tool.execution_complete",
+                "timestamp": "2026-01-01T00:00:04.000Z",
+                "data": {
+                    "toolCallId": "call-huge",
+                    "success": true,
+                    "output": huge_output
+                }
+            });
+            writeln!(f, "{}", serde_json::to_string(&start).unwrap()).unwrap();
+            writeln!(f, "{}", serde_json::to_string(&complete).unwrap()).unwrap();
+        }
+
+        let schema = test_schema();
+        let mut summary = AgentSessionSummary::default();
+        let mut tool_counts = BTreeMap::new();
+        let mut recent_events = Vec::new();
+        summarize_events(
+            "test",
+            &path,
+            "test-session",
+            &mut summary,
+            &mut tool_counts,
+            &mut recent_events,
+            &HashSet::new(),
+            &HashSet::new(),
+            &schema,
+            "test",
+        );
+
+        let raw = raw_tool_call_details_from_events_path(
+            &path,
+            &schema,
+            &summary.recent_tool_calls[0].event_ref,
+        )
+        .expect("raw tool details");
+        assert!(raw.raw_args_truncated);
+        assert!(raw.raw_output_truncated);
+        assert_eq!(raw.raw_args.unwrap().len(), MAX_RAW_DETAIL_VALUE_BYTES);
+        assert_eq!(raw.raw_output.unwrap().len(), MAX_RAW_DETAIL_VALUE_BYTES);
+        assert!(!raw.raw_output_scan_limited);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn raw_tool_call_details_stop_output_scan_after_limit() {
+        use std::io::Write;
+
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "cmc_test_raw_scan_limit_{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        {
+            let f = std::fs::File::create(&path).expect("create temp jsonl");
+            let mut bw = std::io::BufWriter::new(f);
+            writeln!(
+                bw,
+                r#"{{"type":"tool.execution_start","timestamp":"2026-01-01T00:00:03.000Z","data":{{"toolName":"bash","toolCallId":"call-late","arguments":{{"command":"echo secret"}}}}}}"#
+            )
+            .unwrap();
+            let filler = format!(
+                r#"{{"type":"assistant.message","timestamp":"2026-01-01T00:00:03.500Z","data":{{"content":"{}"}}}}"#,
+                "A".repeat(1024)
+            );
+            for _ in 0..((MAX_RAW_DETAIL_SCAN_BYTES / 1024) + 128) {
+                writeln!(bw, "{}", filler).unwrap();
+            }
+            writeln!(
+                bw,
+                r#"{{"type":"tool.execution_complete","timestamp":"2026-01-01T00:00:04.000Z","data":{{"toolCallId":"call-late","success":true,"output":"SECRET_OUTPUT"}}}}"#
+            )
+            .unwrap();
+        }
+
+        let schema = test_schema();
+        let raw = raw_tool_call_details_from_events_path(&path, &schema, "evt-0")
+            .expect("raw tool details");
+
+        assert!(raw.raw_args.unwrap().contains("echo secret"));
+        assert!(raw.raw_output.is_none());
+        assert!(raw.raw_output_scan_limited);
+        assert!(!raw.raw_output_truncated);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
     fn tool_seen_without_turn_start_marks_turn_partial() {
         use std::io::Write;
         let mut path = std::env::temp_dir();
@@ -4978,6 +5677,7 @@ mod tests {
             &allowlist,
             &HashSet::new(),
             &schema,
+            "test",
         );
 
         assert_eq!(summary.recent_turns.len(), 1);
@@ -5033,6 +5733,7 @@ mod tests {
             &allowlist,
             &HashSet::new(),
             &schema,
+            "test",
         );
 
         // Fresh + cache_write = 100_000 + 10_000_000 = 10_100_000.
@@ -5083,6 +5784,7 @@ mod tests {
             &allowlist,
             &HashSet::new(),
             &schema,
+            "test",
         );
 
         assert_eq!(summary.input_tokens, 1_442_027);
@@ -5096,7 +5798,10 @@ mod tests {
 
     #[test]
     fn shutdown_model_metrics_sum_multiple_models_without_cache_read() {
-        let input = r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.5":{"usage":{"inputTokens":1952371,"cacheReadTokens":1817600,"cacheWriteTokens":0,"outputTokens":12265}},"claude-haiku-4.5":{"usage":{"inputTokens":913294,"cacheReadTokens":819040,"cacheWriteTokens":88379,"outputTokens":9429}}}}}"#;
+        let input = concat!(
+            r#"{"type":"session.shutdown","data":{"modelMetrics":{"gpt-5.5":{"usage":{"inputTokens":1952371,"cacheReadTokens":1817600,"cacheWriteTokens":0,"outputTokens":12265}},"claude-haiku-4.5":{"usage":{"inputTokens":913294,"cacheReadTokens":819040,"cacheWriteTokens":88379,"outputTokens":9429}}}}}"#,
+            "\n"
+        );
         let mut summary = AgentSessionSummary::default();
         let schema = test_schema();
 
@@ -5141,6 +5846,7 @@ mod tests {
             &allowlist,
             &HashSet::new(),
             &schema,
+            "test",
         );
 
         assert_eq!(summary.last_event_kind, "tool.execution_start");
@@ -5182,6 +5888,110 @@ mod tests {
         );
         // Output: 1K + 2K (compactions) = 3K, then max(3K, 10K shutdown) = 10K.
         assert_eq!(summary.output_tokens, 10_000);
+    }
+
+    #[test]
+    fn skipped_token_prefix_cache_reuses_prior_prefix_without_double_counting() {
+        use std::io::Write;
+
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "cmc_test_token_prefix_cache_{}.jsonl",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        let schema = test_schema();
+        let context = format!("test-prefix-cache-{}", std::process::id());
+        let filler =
+            r#"{"type":"tool.execution_complete","data":{"toolCallId":"pad","success":true}}"#;
+
+        {
+            let f = std::fs::File::create(&path).expect("create temp jsonl");
+            let mut bw = std::io::BufWriter::new(f);
+            writeln!(
+                bw,
+                r#"{{"type":"session.compaction_complete","data":{{"compactionTokensUsed":{{"inputTokens":100,"outputTokens":10}}}}}}"#
+            )
+            .unwrap();
+            for _ in 0..64 {
+                writeln!(bw, "{}", filler).unwrap();
+            }
+        }
+
+        let first_len = std::fs::metadata(&path).expect("stat first file").len();
+        let mut first_summary = AgentSessionSummary::default();
+        fold_skipped_token_events_from_path(
+            &path,
+            first_len,
+            &mut first_summary,
+            &schema,
+            &context,
+        );
+        assert_eq!(first_summary.input_tokens, 100);
+        assert_eq!(first_summary.output_tokens, 10);
+
+        {
+            let f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .expect("append temp jsonl");
+            let mut bw = std::io::BufWriter::new(f);
+            writeln!(
+                bw,
+                r#"{{"type":"session.compaction_complete","data":{{"compactionTokensUsed":{{"inputTokens":200,"outputTokens":20}}}}}}"#
+            )
+            .unwrap();
+            for _ in 0..64 {
+                writeln!(bw, "{}", filler).unwrap();
+            }
+        }
+
+        let second_len = std::fs::metadata(&path).expect("stat second file").len();
+        let mut second_summary = AgentSessionSummary::default();
+        fold_skipped_token_events_from_path(
+            &path,
+            second_len,
+            &mut second_summary,
+            &schema,
+            &context,
+        );
+
+        assert_eq!(
+            second_summary.input_tokens, 300,
+            "cached prefix must not be double counted after append"
+        );
+        assert_eq!(second_summary.output_tokens, 30);
+
+        {
+            let f = std::fs::File::create(&path).expect("rewrite temp jsonl");
+            let mut bw = std::io::BufWriter::new(f);
+            writeln!(
+                bw,
+                r#"{{"type":"session.compaction_complete","data":{{"compactionTokensUsed":{{"inputTokens":7,"outputTokens":3}}}}}}"#
+            )
+            .unwrap();
+            for _ in 0..64 {
+                writeln!(bw, "{}", filler).unwrap();
+            }
+        }
+
+        let rewritten_len = std::fs::metadata(&path).expect("stat rewritten file").len();
+        let mut rewritten_summary = AgentSessionSummary::default();
+        fold_skipped_token_events_from_path(
+            &path,
+            rewritten_len,
+            &mut rewritten_summary,
+            &schema,
+            &context,
+        );
+        assert_eq!(
+            rewritten_summary.input_tokens, 7,
+            "rewritten files with the same path must not reuse stale cached prefixes"
+        );
+        assert_eq!(rewritten_summary.output_tokens, 3);
+
+        let _ = std::fs::remove_file(&path);
     }
 
     /// Regression: when events.jsonl is larger than the 8 MiB tail
@@ -5240,6 +6050,7 @@ mod tests {
             &allowlist,
             &HashSet::new(),
             &schema,
+            "test",
         );
 
         assert_eq!(

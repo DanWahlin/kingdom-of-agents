@@ -6,6 +6,7 @@
 //   - Save/restore window position across launches (window-state plugin)
 //   - Expose Copilot CLI session summaries to the renderer via
 //     `get_copilot_activity` / `get_agent_activity`
+//     (`get_agent_activity_with_history` is loaded only on the History route)
 //   - Watch the local Copilot state directory and push refresh
 //     callbacks into the renderer when sessions change
 //   - Open files in an external editor (vscode://) — bypasses the
@@ -24,7 +25,9 @@ use tauri_plugin_window_state::StateFlags;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use agent::{collect_agent_activity, AgentActivity, RawToolCallDetails};
+use agent::{
+    collect_agent_activity, collect_agent_activity_with_history, AgentActivity, RawToolCallDetails,
+};
 
 // Icons baked into the binary so they survive whether the binary is
 // launched bare (`tauri dev`) or wrapped in an .app bundle (`tauri build`).
@@ -128,27 +131,45 @@ fn hide_app(app: AppHandle) {
 /// prompt text, assistant text, tool arguments, file paths, or
 /// command output — see the allowlist in `agent::summarize_events`.
 #[tauri::command]
-fn get_agent_activity() -> AgentActivity {
-    collect_agent_activity()
+async fn get_agent_activity() -> Result<AgentActivity, String> {
+    tauri::async_runtime::spawn_blocking(collect_agent_activity)
+        .await
+        .map_err(|err| err.to_string())
+}
+
+/// Full activity summary for the History route. This intentionally runs
+/// separately from the mission command so the main dashboard doesn't pay
+/// the aggregation cost while the History screen is unloaded.
+#[tauri::command]
+async fn get_agent_activity_with_history() -> Result<AgentActivity, String> {
+    tauri::async_runtime::spawn_blocking(collect_agent_activity_with_history)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Backward-compatible alias for `get_agent_activity`. Earlier renderer
 /// builds invoke this name.
 #[tauri::command]
-fn get_copilot_activity() -> AgentActivity {
-    collect_agent_activity()
+async fn get_copilot_activity() -> Result<AgentActivity, String> {
+    tauri::async_runtime::spawn_blocking(collect_agent_activity)
+        .await
+        .map_err(|err| err.to_string())
 }
 
 /// Explicit local-only raw reveal for one inspector row. The normal
 /// activity command remains privacy-safe; this only runs after the user
 /// clicks the Inspector reveal action.
 #[tauri::command]
-fn get_raw_tool_call_details(
+async fn get_raw_tool_call_details(
     provider: Option<String>,
     session_id: String,
     event_ref: String,
 ) -> Result<RawToolCallDetails, String> {
-    agent::get_raw_tool_call_details(provider, session_id, event_ref)
+    tauri::async_runtime::spawn_blocking(move || {
+        agent::get_raw_tool_call_details(provider, session_id, event_ref)
+    })
+    .await
+    .map_err(|err| err.to_string())?
 }
 
 /// Open the given filesystem path in an external editor by shelling out
@@ -304,6 +325,7 @@ pub fn run() {
             quit_app,
             hide_app,
             get_agent_activity,
+            get_agent_activity_with_history,
             get_copilot_activity,
             get_raw_tool_call_details,
             install_update,

@@ -1,6 +1,21 @@
 # Changelog
 
 All notable changes to Copilot Mission Control.
+## [0.1.8] - 2026-05-29
+
+### 🚀 Features & Improvements
+
+- Feat: add global history analytics feature with detailed session tracking
+- Feat: add mission layout and types for Copilot activity
+
+### 💼 Other
+
+- Refine mission control history UI
+## [0.1.7] - 2026-05-28
+
+### ⚙️ CI/CD & Build
+
+- Release v0.1.7
 ## [0.1.6] - 2026-05-27
 
 ### 📚 Documentation

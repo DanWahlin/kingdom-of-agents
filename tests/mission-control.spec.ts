@@ -1066,6 +1066,31 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(sectorText).not.toContain('Selected:');
   });
 
+  test('sector details omit secondary tool summary text', async ({ page }) => {
+    await page.evaluate(() => {
+      const fixture = (window as any).__missionControlFixture;
+      const beta = fixture.sessions.find((session: any) => session.id === 'beta4567');
+      beta.recent_tool_calls = [
+        { tool: 'postToolUse', category: 'hooks', timestamp: '2026-05-21T07:13:30Z', success: true, call_id: 'hook-post' },
+        { tool: 'preToolUse', category: 'hooks', timestamp: '2026-05-21T07:13:00Z', success: true, call_id: 'hook-pre' },
+      ];
+      window.__cmcOnAgentActivityChanged?.();
+    });
+
+    const state = await getMissionState(page);
+    const hooks = state!.quarterRects.find((d: any) => d.key === 'hooks');
+    expect(hooks).toBeTruthy();
+    const off = await canvasOffset(page);
+    await page.mouse.move(off.x + hooks!.x, off.y + hooks!.y);
+    await expect.poll(async () => (await getMissionState(page))!.inspectedQuarterKey).toBe('hooks');
+
+    const sector = page.locator('#dom-quarter');
+    await expect(sector).toContainText('2 selected-session hooks signals');
+    await expect(sector).not.toContainText('Also:');
+    await expect(sector.locator('.cmc-quarter-tools')).toHaveCount(0);
+    await expect(sector.locator('[data-cmc-action="quarter-details"]')).toBeVisible();
+  });
+
   test('session dropdown shows custom session names as a secondary line', async ({ page }) => {
     await page.evaluate(() => {
       const fixture = (window as any).__missionControlFixture;
@@ -1209,12 +1234,12 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     expect(text).not.toContain('report_intent');
     expect(text).not.toContain('Age: 2h');
 
-    const pillTops = await page.locator('#dom-session .cmc-meta-pill').evaluateAll((pills) =>
-      pills.map((pill) => Math.round((pill as HTMLElement).getBoundingClientRect().top)),
+    const labelTops = await page.locator('#dom-session .cmc-meta-label').evaluateAll((labels) =>
+      labels.map((label) => Math.round((label as HTMLElement).getBoundingClientRect().top)),
     );
-    expect(pillTops).toHaveLength(4);
-    expect(new Set(pillTops).size).toBe(4);
-    expect(pillTops).toEqual([...pillTops].sort((a, b) => a - b));
+    expect(labelTops).toHaveLength(4);
+    expect(new Set(labelTops).size).toBe(4);
+    expect(labelTops).toEqual([...labelTops].sort((a, b) => a - b));
   });
 
   test('selected session shows pending input tokens until usage summary is emitted', async ({ page }) => {
@@ -1610,6 +1635,56 @@ test.describe('Copilot Mission Control — Dashboard', () => {
     await page.locator('[data-inspector-reveal]').click();
     await expect(page.locator('#inspector-dialog')).toContainText('SECRET_AGENT');
     await expect(page.locator('#inspector-dialog')).toContainText('SECRET_AGENT_OUTPUT');
+  });
+
+  test('inspector reveals raw local details for hook rows after explicit opt-in', async ({ page }) => {
+    const fixture = inspectorFixture();
+    const beta = fixture.sessions.find((session: any) => session.id === 'beta4567');
+    beta.recent_tool_calls.push({
+      tool: 'agentStop',
+      category: 'hooks',
+      timestamp: '2026-05-21T07:14:00Z',
+      completed_at: '2026-05-21T07:14:02Z',
+      success: true,
+      duration_ms: 2000,
+      model: 'gpt-5.5',
+      call_id: 'hook-agentstop1',
+      event_ref: 'evt-hook',
+      turn_id: '',
+      target: 'agentStop',
+      details: [
+        { label: 'Type', value: 'Hook' },
+        { label: 'Hook type', value: 'agentStop' },
+        { label: 'Provider', value: 'copilot' },
+        { label: 'Privacy', value: 'input/output hidden' },
+      ],
+    });
+
+    await page.addInitScript((fixtureArg) => {
+      (window as any).__missionControlFixture = fixtureArg;
+      (window as any).__TAURI_INTERNALS__ = {
+        invoke: async (command: string, args: any) => {
+          if (command !== 'get_raw_tool_call_details') throw new Error(`unexpected command ${command}`);
+          if (args.eventRef !== 'evt-hook') throw new Error(`unexpected event ref ${args.eventRef}`);
+          return {
+            raw_args: '{"prompt":"SECRET_HOOK_PROMPT"}',
+            raw_output: 'SECRET_HOOK_OUTPUT',
+          };
+        },
+      };
+    }, fixture);
+    await page.goto(GAME_URL);
+    await waitForGame(page);
+
+    await page.locator('#dom-session [data-cmc-action="inspector"]').click();
+    await page.locator('[data-inspector-tab="hooks"]').click();
+    await expect(page.locator('#inspector-dialog')).toContainText('agentStop');
+    await expect(page.locator('#inspector-dialog')).not.toContainText('SECRET_HOOK_PROMPT');
+
+    await page.locator('[data-inspector-reveal]').click();
+
+    await expect(page.locator('#inspector-dialog')).toContainText('SECRET_HOOK_PROMPT');
+    await expect(page.locator('#inspector-dialog')).toContainText('SECRET_HOOK_OUTPUT');
   });
 
   test('inspector hides raw local details action when no local details are retained', async ({ page }) => {
